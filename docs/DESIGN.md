@@ -32,9 +32,8 @@ A web app for friend groups to **organize hangouts and share costs**:
 - Polls (pick a date/place), recurring events, calendar (.ics) export
 - Web push notifications (PWA), mobile app
 - Multi-currency with FX conversion, expense categories & stats
-- "Group fund" mode: a treasurer collects a fixed fee per member for an event via SePay
 
-**Payments: SePay, payee-direct (see §7).** Money always goes **straight from payer's bank to payee's bank** via a VietQR code. SePay tells us when the transfer landed so the settlement is auto-confirmed. The app never holds or moves money (avoids needing a payment-intermediary licence).
+**Payments: SePay, payee-direct (see §7).** Money always goes **straight from payer's bank to payee's bank** via a VietQR code. There is no treasurer, group fund or central collector: every debt is settled peer-to-peer. Manual confirmation by the payee is the default; connecting SePay is an optional per-user upgrade for automatic confirmation (SePay tells us when the transfer landed). The app never holds or moves money (avoids needing a payment-intermediary licence).
 
 ## 3. Architecture (AWS, container-based, non-serverless)
 
