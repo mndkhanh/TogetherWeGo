@@ -1,0 +1,54 @@
+# Local development stack. Start with `pnpm db:up` from the repo root.
+# Mirrors AWS: Postgres (RDS), Valkey/Redis (ElastiCache), Mailpit (SES), MinIO (S3).
+name: togetherwego
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: twg
+      POSTGRES_PASSWORD: twg
+      POSTGRES_DB: togetherwego
+    ports:
+      - '127.0.0.1:${TWG_POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U twg -d togetherwego']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8-alpine
+    ports:
+      - '127.0.0.1:${TWG_REDIS_PORT:-6380}:6379'
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Catches all outgoing email locally. UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+
+  # S3-compatible storage for receipts/avatars (used from Phase 2). Console: http://localhost:9001
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: twg
+      MINIO_ROOT_PASSWORD: twg-local-only
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - minio-data:/data
+
+volumes:
+  postgres-data:
+  minio-data:

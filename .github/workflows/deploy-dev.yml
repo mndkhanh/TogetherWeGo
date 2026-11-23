@@ -1,0 +1,100 @@
+name: Deploy dev
+
+# Deploys main to the dev environment after CI passes.
+# Needs the repository variables printed by `terraform output github_actions_variables`
+# (Settings > Secrets and variables > Actions > Variables). No AWS keys are stored in GitHub:
+# the job assumes an IAM role through OIDC.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # for AWS OIDC
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dev
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      # ECS runs on Graviton (arm64) instances.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/server.Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Migrate database and roll out ECS services
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_CAPACITY_PROVIDER: ${{ vars.ECS_CAPACITY_PROVIDER }}
+          ECS_API_FAMILY: ${{ vars.ECS_API_FAMILY }}
+          ECS_WORKER_FAMILY: ${{ vars.ECS_WORKER_FAMILY }}
+          ECS_MIGRATE_FAMILY: ${{ vars.ECS_MIGRATE_FAMILY }}
+        run: bash scripts/deploy-ecs.sh
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Build web app
+        run: |
+          pnpm install --frozen-lockfile --filter @twg/web...
+          pnpm --filter @twg/shared build
+          pnpm --filter @twg/web build
+
+      - name: Upload web app and invalidate CDN
+        env:
+          WEB_BUCKET: ${{ vars.WEB_BUCKET }}
+          DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          # Hashed assets are immutable; index.html must always be revalidated.
+          aws s3 sync apps/web/dist "s3://$WEB_BUCKET" --delete \
+            --exclude index.html --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp apps/web/dist/index.html "s3://$WEB_BUCKET/index.html" \
+            --cache-control "no-cache"
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/index.html" "/"
+
+      - name: Smoke test
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "$APP_URL/v1/health"; then exit 0; fi
+            sleep 6
+          done
+          echo "::error::$APP_URL/v1/health is not healthy after deploy"
+          exit 1

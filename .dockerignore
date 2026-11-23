@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+**/*.tsbuildinfo
+apps/server/src/generated
+apps/web
+infra
+.git
+.github
+docs
