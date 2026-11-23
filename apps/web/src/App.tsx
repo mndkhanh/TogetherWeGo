@@ -1,9 +1,13 @@
+import * as React from "react"
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router"
 
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/lib/auth"
+import { clearReturnTo, peekReturnTo, rememberReturnTo } from "@/lib/return-to"
 import { AuthCallbackPage } from "@/pages/auth-callback-page"
+import { GroupPage } from "@/pages/group-page"
 import { HomePage } from "@/pages/home-page"
+import { InvitePage } from "@/pages/invite-page"
 import { LoginPage } from "@/pages/login-page"
 import { RegisterPage } from "@/pages/register-page"
 
@@ -15,21 +19,29 @@ function FullPageSpinner() {
   )
 }
 
-/** Only for signed-in users; everyone else goes to /login. */
+/** Only for signed-in users; everyone else goes to /login and comes back here afterwards. */
 function RequireAuth() {
   const { state } = useAuth()
   const location = useLocation()
+  const signedIn = state.status === "signed-in"
+
+  React.useEffect(() => {
+    if (signedIn) clearReturnTo()
+  }, [signedIn])
+
   if (state.status === "loading") return <FullPageSpinner />
-  if (state.status === "signed-out")
-    return <Navigate to="/login" replace state={{ from: location }} />
+  if (state.status === "signed-out") {
+    rememberReturnTo(location.pathname + location.search)
+    return <Navigate to="/login" replace />
+  }
   return <Outlet />
 }
 
-/** Sign-in pages bounce signed-in users to the app. */
+/** Sign-in pages send signed-in users on to where they were going. */
 function GuestOnly() {
   const { state } = useAuth()
   if (state.status === "loading") return <FullPageSpinner />
-  if (state.status === "signed-in") return <Navigate to="/" replace />
+  if (state.status === "signed-in") return <Navigate to={peekReturnTo()} replace />
   return <Outlet />
 }
 
@@ -39,6 +51,8 @@ export function App() {
       <Routes>
         <Route element={<RequireAuth />}>
           <Route index element={<HomePage />} />
+          <Route path="groups/:groupId" element={<GroupPage />} />
+          <Route path="invite/:code" element={<InvitePage />} />
         </Route>
         <Route element={<GuestOnly />}>
           <Route path="login" element={<LoginPage />} />

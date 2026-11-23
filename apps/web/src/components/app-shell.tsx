@@ -1,0 +1,79 @@
+import { useQuery } from "@tanstack/react-query"
+import type { MeResponse } from "@twg/shared"
+import { LogOutIcon } from "lucide-react"
+import * as React from "react"
+
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Wordmark } from "@/components/wordmark"
+import { api } from "@/lib/api"
+import { meQueryKey, useAuth } from "@/lib/auth"
+import { initials } from "@/lib/format"
+
+/** The signed-in user. Only used under RequireAuth, so it's always available. */
+export function useMe(): MeResponse {
+  const { state } = useAuth()
+  const me = useQuery({
+    queryKey: meQueryKey,
+    queryFn: () => api<MeResponse>("/me"),
+    initialData: state.user ?? undefined,
+  })
+  if (!me.data) throw new Error("useMe() used outside a signed-in page")
+  return me.data
+}
+
+function AccountMenu({ user }: { user: MeResponse }) {
+  const { logout } = useAuth()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button variant="ghost" size="icon-lg" className="rounded-full" />}
+        aria-label="Account menu"
+      >
+        <Avatar>
+          {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
+          <AvatarFallback>{initials(user.name)}</AvatarFallback>
+        </Avatar>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            <div className="truncate font-medium text-foreground">{user.name}</div>
+            <div className="truncate font-normal">{user.email}</div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => void logout()}>
+            <LogOutIcon />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const user = useMe()
+  return (
+    <div className="min-h-svh">
+      <header className="border-b bg-background/80 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+          <Wordmark />
+          <AccountMenu user={user} />
+        </div>
+      </header>
+      <main className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-10">{children}</main>
+    </div>
+  )
+}

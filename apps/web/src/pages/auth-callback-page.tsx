@@ -3,6 +3,7 @@ import { useNavigate } from "react-router"
 
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/lib/auth"
+import { peekReturnTo } from "@/lib/return-to"
 
 /** Landing page after Google sign-in: the server has set the refresh cookie, so restore the session. */
 export function AuthCallbackPage() {
@@ -11,7 +12,7 @@ export function AuthCallbackPage() {
 
   React.useEffect(() => {
     void restore().then((ok) =>
-      navigate(ok ? "/" : "/login?error=google_failed", { replace: true })
+      navigate(ok ? peekReturnTo() : "/login?error=google_failed", { replace: true })
     )
   }, [restore, navigate])
 

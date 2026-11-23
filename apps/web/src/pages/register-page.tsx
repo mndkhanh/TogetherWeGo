@@ -1,6 +1,6 @@
 import { registerSchema } from "@twg/shared"
 import * as React from "react"
-import { Link, useNavigate } from "react-router"
+import { Link } from "react-router"
 
 import { AuthLayout } from "@/components/auth-layout"
 import { GoogleSignIn } from "@/components/google-button"
@@ -15,7 +15,6 @@ import { type FieldErrors, formErrorMessage, toFieldErrors, validate } from "@/l
 
 export function RegisterPage() {
   const { register } = useAuth()
-  const navigate = useNavigate()
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [formError, setFormError] = React.useState<string | null>(null)
   const [pending, setPending] = React.useState(false)
@@ -31,7 +30,7 @@ export function RegisterPage() {
     setPending(true)
     try {
       await register(data)
-      navigate("/", { replace: true })
+      // GuestOnly redirects to the page the user was heading to.
     } catch (error) {
       if (error instanceof ApiError) setFieldErrors(toFieldErrors(error.issues))
       setFormError(formErrorMessage(error))

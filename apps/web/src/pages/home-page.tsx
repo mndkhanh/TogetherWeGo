@@ -1,66 +1,32 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { MeResponse, UpdateMeInput } from "@twg/shared"
-import { LogOutIcon, UsersIcon } from "lucide-react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import type { GroupSummaryResponse, MeResponse, UpdateMeInput } from "@twg/shared"
+import { ChevronRightIcon, UsersIcon } from "lucide-react"
+import * as React from "react"
+import { Link } from "react-router"
 import { toast } from "sonner"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { AppShell, useMe } from "@/components/app-shell"
+import { CreateGroupDialog } from "@/components/create-group-dialog"
+import { CurrencyToggle } from "@/components/currency-toggle"
+import { MemberAvatars } from "@/components/member-avatars"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Wordmark } from "@/components/wordmark"
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
-import { meQueryKey, useAuth } from "@/lib/auth"
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("")
-}
-
-function AccountMenu({ user }: { user: MeResponse }) {
-  const { logout } = useAuth()
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon-lg" className="rounded-full" />}
-        aria-label="Account menu"
-      >
-        <Avatar>
-          {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
-          <AvatarFallback>{initials(user.name)}</AvatarFallback>
-        </Avatar>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>
-            <div className="truncate font-medium text-foreground">{user.name}</div>
-            <div className="truncate font-normal">{user.email}</div>
-          </DropdownMenuLabel>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => void logout()}>
-            <LogOutIcon />
-            Sign out
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
+import { meQueryKey } from "@/lib/auth"
+import { ROLE_LABEL } from "@/lib/format"
+import { useGroups } from "@/lib/groups"
 
 function CurrencySetting({ user }: { user: MeResponse }) {
   const queryClient = useQueryClient()
@@ -69,7 +35,7 @@ function CurrencySetting({ user }: { user: MeResponse }) {
       api<MeResponse>("/me", { method: "PATCH", body: JSON.stringify(input) }),
     onSuccess: (me) => {
       queryClient.setQueryData(meQueryKey, me)
-      toast.success(`New expenses will default to ${me.defaultCurrency}`)
+      toast.success(`New groups will default to ${me.defaultCurrency}`)
     },
     onError: () => toast.error("Couldn't save your currency. Try again."),
   })
@@ -78,73 +44,124 @@ function CurrencySetting({ user }: { user: MeResponse }) {
     <Card>
       <CardHeader>
         <CardTitle>Default currency</CardTitle>
-        <CardDescription>Used when you add an expense. Each group can override it.</CardDescription>
+        <CardDescription>Pre-selected when you create a group.</CardDescription>
       </CardHeader>
       <CardContent>
-        <ToggleGroup
-          variant="outline"
-          value={[user.defaultCurrency]}
+        <CurrencyToggle
+          value={user.defaultCurrency}
           disabled={update.isPending}
-          onValueChange={(value: string[]) => {
-            const next = value[0]
-            if ((next === "VND" || next === "USD") && next !== user.defaultCurrency) {
-              update.mutate({ defaultCurrency: next })
-            }
-          }}
-        >
-          <ToggleGroupItem value="VND">VND ₫</ToggleGroupItem>
-          <ToggleGroupItem value="USD">USD $</ToggleGroupItem>
-        </ToggleGroup>
+          onChange={(currency) => update.mutate({ defaultCurrency: currency })}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function GroupRow({ group }: { group: GroupSummaryResponse }) {
+  return (
+    <Link
+      to={`/groups/${group.id}`}
+      className="group/row flex items-center gap-4 rounded-lg px-3 py-3 outline-offset-2 transition-colors hover:bg-muted"
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-semibold">{group.name}</span>
+          {group.myRole !== "member" && (
+            <Badge variant="secondary">{ROLE_LABEL[group.myRole]}</Badge>
+          )}
+          {group.archivedAt && <Badge variant="outline">Archived</Badge>}
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {group.memberCount === 1 ? "Just you so far" : `${group.memberCount} members`}, in{" "}
+          {group.currency}
+        </span>
+      </div>
+      <MemberAvatars people={group.memberPreview} total={group.memberCount} />
+      <ChevronRightIcon className="text-muted-foreground" aria-hidden />
+    </Link>
+  )
+}
+
+function GroupList({ defaultCurrency }: { defaultCurrency: MeResponse["defaultCurrency"] }) {
+  const groups = useGroups()
+
+  if (groups.isPending) {
+    return (
+      <div className="flex flex-col gap-3" aria-label="Loading groups">
+        <Skeleton className="h-16" />
+        <Skeleton className="h-16" />
+      </div>
+    )
+  }
+
+  if (groups.isError) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription className="flex items-center justify-between gap-4">
+          Couldn't load your groups.
+          <Button variant="outline" size="sm" onClick={() => void groups.refetch()}>
+            Try again
+          </Button>
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (groups.data.length === 0) {
+    return (
+      <Empty className="border border-dashed bg-card">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <UsersIcon />
+          </EmptyMedia>
+          <EmptyTitle>No groups yet</EmptyTitle>
+          <EmptyDescription>
+            Make a group for the friends you hang out with, then share the invite link with them.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <CreateGroupDialog defaultCurrency={defaultCurrency} />
+        </EmptyContent>
+      </Empty>
+    )
+  }
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col">
+        {groups.data.map((group, index) => (
+          <React.Fragment key={group.id}>
+            {index > 0 && <Separator />}
+            <GroupRow group={group} />
+          </React.Fragment>
+        ))}
       </CardContent>
     </Card>
   )
 }
 
 export function HomePage() {
-  const { state } = useAuth()
-  const me = useQuery({
-    queryKey: meQueryKey,
-    queryFn: () => api<MeResponse>("/me"),
-    initialData: state.user ?? undefined,
-  })
-  const user = me.data
-  if (!user) return null
-
+  const user = useMe()
+  const groups = useGroups()
   const firstName = user.name.split(/\s+/)[0] ?? user.name
+  const hasGroups = (groups.data?.length ?? 0) > 0
 
   return (
-    <div className="min-h-svh">
-      <header className="border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-          <Wordmark />
-          <AccountMenu user={user} />
-        </div>
-      </header>
-
-      <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-10">
-        <section className="flex flex-col gap-2">
+    <AppShell>
+      <section className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-2">
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Hi, {firstName}</h1>
           <p className="max-w-[60ch] text-muted-foreground">
-            Your groups, hangouts and balances will show up here.
+            {hasGroups ? "Your groups" : "Start by making a group for your friends."}
           </p>
-        </section>
-
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <Empty className="border border-dashed bg-card">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <UsersIcon />
-              </EmptyMedia>
-              <EmptyTitle>No groups yet</EmptyTitle>
-              <EmptyDescription>
-                A group is where you plan hangouts and split costs with the same friends. Creating
-                groups is the next thing we're building.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-          <CurrencySetting user={user} />
         </div>
-      </main>
-    </div>
+        {hasGroups && <CreateGroupDialog defaultCurrency={user.defaultCurrency} />}
+      </section>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <GroupList defaultCurrency={user.defaultCurrency} />
+        <CurrencySetting user={user} />
+      </div>
+    </AppShell>
   )
 }

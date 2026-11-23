@@ -1,6 +1,6 @@
 import { loginSchema } from "@twg/shared"
 import * as React from "react"
-import { Link, useNavigate, useSearchParams } from "react-router"
+import { Link, useSearchParams } from "react-router"
 
 import { AuthLayout } from "@/components/auth-layout"
 import { GoogleSignIn } from "@/components/google-button"
@@ -21,7 +21,6 @@ const REDIRECT_ERRORS: Record<string, string> = {
 
 export function LoginPage() {
   const { login } = useAuth()
-  const navigate = useNavigate()
   const [params] = useSearchParams()
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [formError, setFormError] = React.useState<string | null>(
@@ -40,7 +39,7 @@ export function LoginPage() {
     setPending(true)
     try {
       await login(data)
-      navigate("/", { replace: true })
+      // GuestOnly redirects to the page the user was heading to.
     } catch (error) {
       if (error instanceof ApiError) setFieldErrors(toFieldErrors(error.issues))
       setFormError(formErrorMessage(error))

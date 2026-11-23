@@ -1,6 +1,6 @@
 # TogetherWeGo — Product & Architecture Draft
 
-> Status: **v0.3** (2026-11-24). Phase 0 (skeleton) is built; see the README for running it. Later phases are still a draft.
+> Status: **v0.4** (2026-11-24). Phases 0 (skeleton) and 1 (groups) are built; see the README for running it. Later phases are still a draft.
 > Changes from v0.1: payments via **SePay**; **non-serverless** architecture (long-running containers on ECS/EC2 + RDS Postgres + Redis).
 
 ## 1. What it is
@@ -109,7 +109,7 @@ refresh_tokens(id, user_id, token_hash, expires_at, revoked_at)
 groups(id, name, currency, created_by, archived_at, created_at)
 group_members(group_id, user_id, role ENUM(owner,admin,member), joined_at, left_at,
               PRIMARY KEY(group_id, user_id))
-group_invites(code PK, group_id, created_by, expires_at, max_uses, uses)
+group_invites(code PK, group_id, created_by, expires_at, max_uses NULL, uses, revoked_at)
 
 events(id, group_id, title, description, location, starts_at, ends_at,
        status ENUM(scheduled,cancelled), created_by)
@@ -154,8 +154,12 @@ GET    /me                          PATCH /me
 
 GET    /groups                      POST  /groups
 GET    /groups/:id                  PATCH /groups/:id
-POST   /groups/:id/invites          POST  /invites/:code/accept
-DELETE /groups/:id/members/:userId
+POST   /groups/:id/archive          POST  /groups/:id/unarchive          (owner)
+GET    /groups/:id/invites          POST  /groups/:id/invites            (admin+)
+DELETE /groups/:id/invites/:code    (revoke, admin+)
+GET    /invites/:code               (preview)    POST /invites/:code/accept
+DELETE /groups/:id/members/:userId  (remove; your own id = leave)
+PATCH  /groups/:id/members/:userId  (change role, owner only; role=owner transfers ownership)
 
 GET    /groups/:id/events           POST  /groups/:id/events
 PATCH  /events/:id                  PUT   /events/:id/rsvp
@@ -276,7 +280,7 @@ TogetherWeGo/
 | Phase | Deliverable |
 |---|---|
 | 0. Skeleton ✅ | Monorepo, docker compose local stack, NestJS + Prisma + auth (email/password, Google), React shell, Terraform for dev env, CI + deploy pipeline |
-| 1. Groups | Groups, members, invite links |
+| 1. Groups ✅ | Groups, roles (owner/admin/member), ownership transfer, archive, invite links with expiry, use limits and revoke. Email invites wait for Phase 5. |
 | 2. Money | Expenses, splits, balances, receipts |
 | 3. Settle up | Bank accounts, SePay QR, settlements, webhook auto-confirm, manual confirm, unmatched inbox |
 | 4. Events | Events, RSVP, comments, link expenses to events |
