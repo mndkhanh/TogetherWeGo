@@ -17,6 +17,12 @@ variable "origin_verify_secret" {
   sensitive = true
 }
 
+variable "upload_origins" {
+  description = "Extra origins the app loads images from and uploads to (the receipts bucket)"
+  type        = list(string)
+  default     = []
+}
+
 variable "price_class" {
   description = "PriceClass_200 includes edge locations in Vietnam and Southeast Asia"
   type        = string
@@ -144,9 +150,9 @@ resource "aws_cloudfront_response_headers_policy" "security" {
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: https://*.googleusercontent.com",
+        join(" ", concat(["img-src 'self' data: blob: https://*.googleusercontent.com"], var.upload_origins)),
         "font-src 'self'",
-        "connect-src 'self'",
+        join(" ", concat(["connect-src 'self'"], var.upload_origins)),
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'",

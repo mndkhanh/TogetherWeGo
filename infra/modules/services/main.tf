@@ -63,6 +63,18 @@ variable "google_client_secret" {
   sensitive = true
 }
 
+variable "receipts_bucket_name" {
+  type = string
+}
+
+variable "receipts_bucket_arn" {
+  type = string
+}
+
+variable "aws_region" {
+  type = string
+}
+
 variable "api_desired_count" {
   type    = number
   default = 2
@@ -145,10 +157,25 @@ resource "aws_iam_role_policy" "execution_secrets" {
   policy = data.aws_iam_policy_document.execution_secrets.json
 }
 
-# Task role: what the application code itself may call. Empty for now (S3/SES come later).
+# Task role: what the application code itself may call. SES comes later.
 resource "aws_iam_role" "task" {
   name               = "${var.name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+# Receipts: sign uploads (PutObject) and views/existence checks (GetObject), under receipts/ only.
+# No ListBucket and no DeleteObject: the app never needs them.
+data "aws_iam_policy_document" "task_receipts" {
+  statement {
+    actions   = ["s3:PutObject", "s3:GetObject"]
+    resources = ["${var.receipts_bucket_arn}/receipts/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task_receipts" {
+  name   = "receipts"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_receipts.json
 }
 
 # ---------- Logs ----------
@@ -174,6 +201,8 @@ locals {
       { name = "COOKIE_SECURE", value = "true" },
       # viewer -> CloudFront -> ALB -> app
       { name = "TRUST_PROXY_HOPS", value = "2" },
+      { name = "AWS_REGION", value = var.aws_region },
+      { name = "RECEIPTS_BUCKET", value = var.receipts_bucket_name },
     ],
     local.google_enabled ? [{ name = "GOOGLE_CLIENT_ID", value = var.google_client_id }] : [],
   )

@@ -13,9 +13,17 @@ interface Person {
   avatarUrl: string | null
 }
 
-export function PersonAvatar({ person, className }: { person: Person; className?: string }) {
+export function PersonAvatar({
+  person,
+  size,
+  className,
+}: {
+  person: Person
+  size?: "default" | "sm" | "lg"
+  className?: string
+}) {
   return (
-    <Avatar className={className}>
+    <Avatar size={size} className={className}>
       {person.avatarUrl && <AvatarImage src={person.avatarUrl} alt="" />}
       <AvatarFallback>{initials(person.name)}</AvatarFallback>
     </Avatar>

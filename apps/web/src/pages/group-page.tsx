@@ -1,4 +1,4 @@
-import { roleAtLeast } from "@twg/shared"
+import { type ExpenseDetailResponse, roleAtLeast } from "@twg/shared"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -6,14 +6,19 @@ import {
   EllipsisIcon,
   LogOutIcon,
   PencilIcon,
+  PlusIcon,
   SearchXIcon,
 } from "lucide-react"
 import * as React from "react"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import { AppShell, useMe } from "@/components/app-shell"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
+import { BalancesPanel } from "@/components/expenses/balances-panel"
+import { ExpenseDetailDialog } from "@/components/expenses/expense-detail-dialog"
+import { ExpenseFormDialog } from "@/components/expenses/expense-form-dialog"
+import { ExpenseList } from "@/components/expenses/expense-list"
 import { EditGroupDialog } from "@/components/group/edit-group-dialog"
 import { InviteCard } from "@/components/group/invite-card"
 import { MembersCard } from "@/components/group/members-card"
@@ -37,6 +42,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ApiError } from "@/lib/api"
 import { formErrorMessage } from "@/lib/form-errors"
 import { useGroup, useRemoveMember, useSetArchived } from "@/lib/groups"
@@ -86,6 +92,11 @@ export function GroupPage() {
   const removeMember = useRemoveMember(groupId)
   const [editing, setEditing] = React.useState(false)
   const [confirm, setConfirm] = React.useState<ConfirmRequest | null>(null)
+  const [addingExpense, setAddingExpense] = React.useState(false)
+  const [editingExpense, setEditingExpense] = React.useState<ExpenseDetailResponse | null>(null)
+  const [openExpenseId, setOpenExpenseId] = React.useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = searchParams.get("tab") ?? "expenses"
 
   if (group.isPending) {
     return (
@@ -166,7 +177,7 @@ export function GroupPage() {
     <AppShell>
       <BackLink />
 
-      <section className="flex items-start justify-between gap-4">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-extrabold tracking-tight break-words sm:text-4xl">
@@ -180,43 +191,51 @@ export function GroupPage() {
           </p>
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="outline" size="icon-lg" />}
-            aria-label="Group options"
-          >
-            <EllipsisIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-52">
-            {isAdmin && !archived && (
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => setEditing(true)}>
-                  <PencilIcon />
-                  Edit group
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            )}
-            {isOwner && (
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => confirmArchive(!archived)}>
-                  {archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
-                  {archived ? "Unarchive group" : "Archive group"}
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            )}
-            {!isOwner && (
-              <>
-                {isAdmin && !archived && <DropdownMenuSeparator />}
+        <div className="flex shrink-0 items-center gap-2">
+          {!archived && (
+            <Button size="lg" onClick={() => setAddingExpense(true)}>
+              <PlusIcon data-icon="inline-start" />
+              Add expense
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button variant="outline" size="icon-lg" />}
+              aria-label="Group options"
+            >
+              <EllipsisIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              {isAdmin && !archived && (
                 <DropdownMenuGroup>
-                  <DropdownMenuItem variant="destructive" onClick={confirmLeave}>
-                    <LogOutIcon />
-                    Leave group
+                  <DropdownMenuItem onClick={() => setEditing(true)}>
+                    <PencilIcon />
+                    Edit group
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              )}
+              {isOwner && (
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => confirmArchive(!archived)}>
+                    {archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
+                    {archived ? "Unarchive group" : "Archive group"}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              )}
+              {!isOwner && (
+                <>
+                  {isAdmin && !archived && <DropdownMenuSeparator />}
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem variant="destructive" onClick={confirmLeave}>
+                      <LogOutIcon />
+                      Leave group
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </section>
 
       {archived && (
@@ -231,13 +250,74 @@ export function GroupPage() {
         </Alert>
       )}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <MembersCard group={data} myUserId={me.id} onConfirm={setConfirm} />
-        {isAdmin && !archived && (
-          <InviteCard groupId={data.id} groupName={data.name} onConfirm={setConfirm} />
-        )}
-      </div>
+      <Tabs
+        value={tab}
+        onValueChange={(value) =>
+          setSearchParams(value === "expenses" ? {} : { tab: String(value) }, { replace: true })
+        }
+        className="gap-4"
+      >
+        <TabsList>
+          <TabsTrigger value="expenses">Expenses</TabsTrigger>
+          <TabsTrigger value="balances">Balances</TabsTrigger>
+          <TabsTrigger value="members">Members</TabsTrigger>
+        </TabsList>
+        <TabsContent value="expenses">
+          <ExpenseList
+            groupId={data.id}
+            myUserId={me.id}
+            onOpen={setOpenExpenseId}
+            addButton={
+              archived ? undefined : (
+                <Button onClick={() => setAddingExpense(true)}>
+                  <PlusIcon data-icon="inline-start" />
+                  Add the first expense
+                </Button>
+              )
+            }
+          />
+        </TabsContent>
+        <TabsContent value="balances">
+          <BalancesPanel groupId={data.id} myUserId={me.id} />
+        </TabsContent>
+        <TabsContent value="members">
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <MembersCard group={data} myUserId={me.id} onConfirm={setConfirm} />
+            {isAdmin && !archived && (
+              <InviteCard groupId={data.id} groupName={data.name} onConfirm={setConfirm} />
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
 
+      <ExpenseFormDialog
+        group={data}
+        myUserId={me.id}
+        open={addingExpense}
+        onOpenChange={setAddingExpense}
+      />
+      {editingExpense && (
+        <ExpenseFormDialog
+          key={editingExpense.id}
+          group={data}
+          myUserId={me.id}
+          expense={editingExpense}
+          open
+          onOpenChange={(open) => !open && setEditingExpense(null)}
+        />
+      )}
+      <ExpenseDetailDialog
+        groupId={data.id}
+        expenseId={openExpenseId}
+        myUserId={me.id}
+        archived={archived}
+        onClose={() => setOpenExpenseId(null)}
+        onEdit={(expense) => {
+          setOpenExpenseId(null)
+          setEditingExpense(expense)
+        }}
+        onConfirm={setConfirm}
+      />
       {isAdmin && <EditGroupDialog group={data} open={editing} onOpenChange={setEditing} />}
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </AppShell>

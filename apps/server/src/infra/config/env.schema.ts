@@ -40,6 +40,12 @@ export const envSchema = z
     GOOGLE_CLIENT_ID: optionalString,
     GOOGLE_CLIENT_SECRET: optionalString,
     GOOGLE_REDIRECT_URI: optionalString,
+
+    AWS_REGION: z.string().default('ap-southeast-1'),
+    /** Private bucket for receipt photos. Unset: receipts are turned off. */
+    RECEIPTS_BUCKET: optionalString,
+    /** Only for local S3-compatible emulators; leave unset on AWS. */
+    S3_ENDPOINT: optionalString,
   })
   .transform((env, ctx) => {
     let databaseUrl = env.DATABASE_URL;
@@ -97,6 +103,9 @@ export const envSchema = z
               redirectUri: env.GOOGLE_REDIRECT_URI ?? `${appOrigin}/v1/auth/google/callback`,
             }
           : undefined,
+      receipts: env.RECEIPTS_BUCKET
+        ? { bucket: env.RECEIPTS_BUCKET, region: env.AWS_REGION, endpoint: env.S3_ENDPOINT }
+        : undefined,
     };
   });
 

@@ -1,6 +1,6 @@
 # TogetherWeGo — Product & Architecture Draft
 
-> Status: **v0.4** (2026-11-24). Phases 0 (skeleton) and 1 (groups) are built; see the README for running it. Later phases are still a draft.
+> Status: **v0.5** (2026-11-24). Phases 0 (skeleton), 1 (groups) and 2 (expenses) are built; see the README for running it. Later phases are still a draft.
 > Changes from v0.1: payments via **SePay**; **non-serverless** architecture (long-running containers on ECS/EC2 + RDS Postgres + Redis).
 
 ## 1. What it is
@@ -116,11 +116,14 @@ events(id, group_id, title, description, location, starts_at, ends_at,
 event_rsvps(event_id, user_id, status ENUM(going,maybe,no), PRIMARY KEY(event_id,user_id))
 event_comments(id, event_id, user_id, body, created_at)
 
-expenses(id, group_id, event_id NULL, payer_id, amount BIGINT, currency, title,
-         split_type ENUM(equal,exact,percent,shares), receipt_key, created_by,
-         deleted_at, version INT, created_at)
-expense_splits(expense_id, user_id, amount BIGINT, PRIMARY KEY(expense_id,user_id))
-   -- CHECK: SUM(splits.amount) = expenses.amount (enforced in the service, inside one transaction)
+expenses(id, group_id, event_id NULL, payer_id, amount BIGINT CHECK > 0, currency, title, note,
+         split_type ENUM(equal,exact,percent,shares), spent_on DATE, receipt_key, created_by,
+         deleted_at, version INT, created_at, updated_at)        -- event_id arrives in Phase 4
+expense_splits(expense_id, user_id, amount BIGINT CHECK >= 0, value INT,
+               PRIMARY KEY(expense_id,user_id))
+   -- value = what was entered: amount, basis points (percent) or shares
+   -- SUM(splits.amount) = expenses.amount: checked by the service AND by a deferred
+   --   constraint trigger at COMMIT, so a bug can't save unbalanced money
 
 settlements(id, group_id, from_user_id, to_user_id, amount BIGINT,
             payment_code UNIQUE, status ENUM(pending,confirmed,expired,cancelled),
@@ -137,6 +140,7 @@ sepay_transactions(id PK  -- SePay's id, used for dedupe
 notifications(id, user_id, type, payload JSONB, read_at, created_at)
 outbox(id, type, payload JSONB, created_at, processed_at)   -- see §6
 activity_log(id, group_id, actor_id, action, entity, entity_id, diff JSONB, created_at)
+   -- append-only: a trigger rejects UPDATE and DELETE (except when the whole group is deleted)
 ```
 
 **Balances are derived, not stored.** For each user, net balance = (sum of expenses they paid − sum of their splits) + (settlements they sent − settlements they received), counting only confirmed settlements. A single SQL query per group computes this, and groups are small. Add a materialized cache later if needed. The invariant (all members' balances in a group sum to 0) is tested.
@@ -165,9 +169,11 @@ GET    /groups/:id/events           POST  /groups/:id/events
 PATCH  /events/:id                  PUT   /events/:id/rsvp
 GET/POST /events/:id/comments
 
-GET    /groups/:id/expenses         POST  /groups/:id/expenses
-PATCH  /expenses/:id                DELETE /expenses/:id
-POST   /uploads/receipt-url         (returns pre-signed S3 PUT URL)
+GET    /groups/:id/expenses         POST  /groups/:id/expenses     (?cursor, newest first)
+GET    /expenses/:id                (with history + 5-minute receipt link)
+PATCH  /expenses/:id                (whole expense + version; 409 if someone changed it first)
+DELETE /expenses/:id                (soft delete)
+POST   /groups/:id/receipts         (presigned S3 POST: key, type and max size pinned)
 
 GET    /groups/:id/balances         (net + simplified "who pays whom")
 POST   /groups/:id/settlements      (creates PENDING settlement + payment code, returns QR URL)
@@ -281,7 +287,7 @@ TogetherWeGo/
 |---|---|
 | 0. Skeleton ✅ | Monorepo, docker compose local stack, NestJS + Prisma + auth (email/password, Google), React shell, Terraform for dev env, CI + deploy pipeline |
 | 1. Groups ✅ | Groups, roles (owner/admin/member), ownership transfer, archive, invite links with expiry, use limits and revoke. Email invites wait for Phase 5. |
-| 2. Money | Expenses, splits, balances, receipts |
+| 2. Money ✅ | Expenses (equal / exact / percent / shares), balances with suggested payments, receipt photos on S3, edit history, optimistic locking. Leaving needs a zero balance. |
 | 3. Settle up | Bank accounts, SePay QR, settlements, webhook auto-confirm, manual confirm, unmatched inbox |
 | 4. Events | Events, RSVP, comments, link expenses to events |
 | 5. Notifications | Outbox → BullMQ → in-app feed + Socket.IO + SES email, preferences |
@@ -292,7 +298,7 @@ TogetherWeGo/
 
 1. **SePay connection:** is OAuth2 app registration with SePay available to us, or do we start with the manual webhook setup?
 2. **Default currency:** VND? Is multi-currency within one group needed in v1?
-3. **Who can edit or delete an expense:** anyone in the group, or only the creator and admins?
+3. ~~Who can edit or delete an expense~~ — decided: the person who added it, the person who paid, or a group admin/owner. Expenses involving someone who has left are frozen.
 4. **Group size:** what is the expected max number of members?
 5. ~~Compute~~ — decided: ECS on EC2 (Graviton `t4g.small`), bridge networking.
 6. ~~Auth~~ — decided: self-managed in NestJS (JWT access token in memory, rotating httpOnly refresh cookie).

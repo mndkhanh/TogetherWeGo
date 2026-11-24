@@ -13,6 +13,7 @@ import {
   roleAtLeast,
   type UpdateGroupInput,
 } from '@twg/shared';
+import { lockGroup, netBalances } from '../expenses/ledger.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
 import { GroupAccessService } from './group-access.service.js';
 import { toGroupDetail, toGroupSummary } from './group-mappers.js';
@@ -73,7 +74,20 @@ export class GroupsService {
       minRole: 'admin',
       requireActive: true,
     });
-    await this.prisma.group.update({ where: { id: groupId }, data: input });
+    await this.prisma.$transaction(async (tx) => {
+      // FOR UPDATE: waits for in-flight expense writes (FOR SHARE) and blocks new ones, so
+      // the first expense can't be saved in the old currency while it changes.
+      const locked = await lockGroup(tx, groupId, 'update');
+      if (input.currency && input.currency !== locked?.currency) {
+        const hasExpenses = await tx.expense.count({ where: { groupId, deletedAt: null } });
+        if (hasExpenses > 0) {
+          throw new ConflictException(
+            'You can’t change the currency after expenses have been added',
+          );
+        }
+      }
+      await tx.group.update({ where: { id: groupId }, data: input });
+    });
     return this.detail(groupId, membership.role);
   }
 
@@ -113,19 +127,35 @@ export class GroupsService {
       }
     }
 
-    // Phase 2 adds: refuse while the member still owes or is owed money in this group.
-    const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.groupMember.update({
+    await this.prisma.$transaction(async (tx) => {
+      // Lock the membership first: adding an expense for this person takes FOR SHARE on the
+      // same row, so the balance can't change between this check and leaving.
+      const [row] = await tx.$queryRaw<{ name: string }[]>`
+        SELECT u.name FROM group_members m JOIN users u ON u.id = m.user_id
+        WHERE m.group_id = ${groupId}::uuid AND m.user_id = ${targetId}::uuid AND m.left_at IS NULL
+        FOR UPDATE OF m`;
+      if (!row) throw new NotFoundException('That person is not a member of this group');
+
+      const net = (await netBalances(tx, groupId)).get(targetId) ?? 0;
+      if (net !== 0) {
+        throw new ConflictException(
+          leaving
+            ? 'You still owe or are owed money in this group. Settle up before you leave.'
+            : `${row.name} still owes or is owed money in this group. Settle up before removing them.`,
+        );
+      }
+
+      const now = new Date();
+      await tx.groupMember.update({
         where: { groupId_userId: { groupId, userId: targetId } },
         data: { leftAt: now },
-      }),
+      });
       // Links someone shared must stop working once they're no longer in the group.
-      this.prisma.groupInvite.updateMany({
+      await tx.groupInvite.updateMany({
         where: { groupId, createdBy: targetId, revokedAt: null },
         data: { revokedAt: now },
-      }),
-    ]);
+      });
+    });
   }
 
   /**

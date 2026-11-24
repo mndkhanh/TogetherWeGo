@@ -1,5 +1,5 @@
 # Local development stack. Start with `pnpm db:up` from the repo root.
-# Mirrors AWS: Postgres (RDS), Valkey/Redis (ElastiCache), Mailpit (SES), MinIO (S3).
+# Mirrors AWS: Postgres (RDS), Valkey/Redis (ElastiCache), Mailpit (SES), RustFS (S3).
 name: togetherwego
 
 services:
@@ -36,19 +36,21 @@ services:
       - '127.0.0.1:1025:1025'
       - '127.0.0.1:8025:8025'
 
-  # S3-compatible storage for receipts/avatars (used from Phase 2). Console: http://localhost:9001
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ':9001'
+  # S3-compatible storage for receipt photos (stands in for the private S3 bucket).
+  # RustFS, because the MinIO images are no longer published. The API creates the
+  # bucket on startup when S3_ENDPOINT is set (local only). Console: http://localhost:9001
+  s3:
+    image: rustfs/rustfs:1.0.6
     environment:
-      MINIO_ROOT_USER: twg
-      MINIO_ROOT_PASSWORD: twg-local-only
+      RUSTFS_ACCESS_KEY: twg
+      RUSTFS_SECRET_KEY: twg-local-only
+      RUSTFS_CONSOLE_ENABLE: 'true'
     ports:
-      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:${TWG_S3_PORT:-9000}:9000'
       - '127.0.0.1:9001:9001'
     volumes:
-      - minio-data:/data
+      - s3-data:/data
 
 volumes:
   postgres-data:
-  minio-data:
+  s3-data:

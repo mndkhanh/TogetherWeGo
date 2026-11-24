@@ -33,6 +33,12 @@ jobs:
         ports: ['6379:6379']
         options: >-
           --health-cmd "valkey-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+      s3:
+        image: rustfs/rustfs:1.0.6
+        env:
+          RUSTFS_ACCESS_KEY: twg
+          RUSTFS_SECRET_KEY: twg-local-only
+        ports: ['9000:9000']
 
     env:
       DATABASE_URL: postgresql://twg:twg@localhost:5432/togetherwego
@@ -41,6 +47,12 @@ jobs:
       JWT_ACCESS_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
       COOKIE_SECURE: 'false'
       LOG_LEVEL: warn
+      # Local S3 emulator credentials (not secrets)
+      RECEIPTS_BUCKET: twg-receipts
+      S3_ENDPOINT: http://localhost:9000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: twg
+      AWS_SECRET_ACCESS_KEY: twg-local-only
 
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +68,7 @@ jobs:
       - run: pnpm --filter @twg/shared build
       - run: pnpm typecheck
       - run: pnpm test
-      - name: E2E tests (API against Postgres + Redis)
+      - name: E2E tests (API against Postgres + Redis + S3 emulator)
         run: |
           pnpm --filter @twg/server prisma:deploy
           pnpm --filter @twg/server test:e2e

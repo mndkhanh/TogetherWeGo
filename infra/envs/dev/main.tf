@@ -38,11 +38,28 @@ module "data" {
   deletion_protection = false
 }
 
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  # Named up front (account id keeps it globally unique) so the web CSP can allow it
+  # without a dependency cycle: the bucket's CORS needs the CloudFront domain.
+  receipts_bucket = "${local.name}-receipts-${data.aws_caller_identity.current.account_id}"
+  receipts_origin = "https://${local.receipts_bucket}.s3.${data.aws_region.current.region}.amazonaws.com"
+}
+
 module "web" {
   source               = "../../modules/web"
   name                 = local.name
   alb_dns_name         = module.cluster.alb_dns_name
   origin_verify_secret = random_password.origin_verify.result
+  upload_origins       = [local.receipts_origin]
+}
+
+module "storage" {
+  source      = "../../modules/storage"
+  bucket_name = local.receipts_bucket
+  app_origin  = "https://${module.web.domain_name}"
 }
 
 module "services" {
@@ -60,6 +77,9 @@ module "services" {
   origin_verify_secret   = random_password.origin_verify.result
   google_client_id       = var.google_client_id
   google_client_secret   = var.google_client_secret
+  receipts_bucket_name   = module.storage.bucket_name
+  receipts_bucket_arn    = module.storage.bucket_arn
+  aws_region             = data.aws_region.current.region
 }
 
 module "github_oidc" {

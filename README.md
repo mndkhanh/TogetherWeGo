@@ -19,7 +19,7 @@ Requirements: Node 24, Docker, and pnpm (`corepack enable`, or `npm i -g pnpm`).
 ```bash
 pnpm install
 cp apps/server/.env.example apps/server/.env   # then set JWT_ACCESS_SECRET (command in the file)
-pnpm db:up                                      # Postgres :5432, Valkey :6380, Mailpit :8025, MinIO :9001
+pnpm db:up                                      # Postgres :5432, Valkey :6380, Mailpit :8025, RustFS (S3) :9000/:9001
 pnpm --filter @twg/shared build
 pnpm db:migrate
 pnpm dev                                        # API on :3100, web on http://localhost:5173
@@ -79,5 +79,10 @@ aws ssm start-session --target <instance-id>            # shell on an ECS instan
 - Containers run as a non-root user with a read-only root filesystem and all Linux capabilities dropped;
   IMDSv2 with hop limit 1 stops containers from reading the instance role's credentials.
 - Secrets come from Secrets Manager at container start (the RDS master password is managed by RDS itself).
+- Money is integer minor units. The database itself rejects unbalanced splits (deferred trigger) and
+  non-positive amounts, and the activity log is append-only.
+- Receipt photos go straight from the browser to a private S3 bucket through presigned POSTs that pin the
+  key, type and size; the API checks a key belongs to the group before attaching it, and photos are viewed
+  through 5-minute presigned links. The task role can only read and write `receipts/*`.
 - Access tokens live in memory only; refresh tokens are httpOnly, `SameSite=Lax`, scoped to `/v1/auth`,
   rotated on every use, with reuse detection that revokes the whole session family.

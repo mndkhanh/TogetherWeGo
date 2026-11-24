@@ -1,4 +1,4 @@
-// Identity (phase 0) and groups (phase 1). Expenses, settlements etc. come in later phases.
+// Identity (phase 0), groups (phase 1) and expenses (phase 2). Settlements etc. come later.
 
 generator client {
   provider            = "prisma-client"
@@ -29,10 +29,14 @@ model User {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  refreshTokens  RefreshToken[]
-  memberships    GroupMember[]
-  createdGroups  Group[]        @relation("GroupCreator")
-  createdInvites GroupInvite[]
+  refreshTokens   RefreshToken[]
+  memberships     GroupMember[]
+  createdGroups   Group[]        @relation("GroupCreator")
+  createdInvites  GroupInvite[]
+  paidExpenses    Expense[]      @relation("ExpensePayer")
+  createdExpenses Expense[]      @relation("ExpenseCreator")
+  expenseSplits   ExpenseSplit[]
+  activity        ActivityLog[]
 
   @@map("users")
 }
@@ -74,9 +78,11 @@ model Group {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  creator User          @relation("GroupCreator", fields: [createdBy], references: [id])
-  members GroupMember[]
-  invites GroupInvite[]
+  creator  User          @relation("GroupCreator", fields: [createdBy], references: [id])
+  members  GroupMember[]
+  invites  GroupInvite[]
+  expenses Expense[]
+  activity ActivityLog[]
 
   @@map("groups")
 }
@@ -115,4 +121,76 @@ model GroupInvite {
 
   @@index([groupId])
   @@map("group_invites")
+}
+
+enum SplitType {
+  equal
+  exact
+  percent
+  shares
+}
+
+/// Amounts are BIGINT minor units in the group's currency (VND: whole đồng). Never floats.
+/// Deleting is soft (deletedAt) so balances can be audited. `version` is for optimistic locking.
+model Expense {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  groupId    String    @map("group_id") @db.Uuid
+  payerId    String    @map("payer_id") @db.Uuid
+  amount     BigInt
+  currency   Currency
+  title      String
+  note       String?
+  splitType  SplitType @map("split_type")
+  /// The calendar day it was spent (no time zone).
+  spentOn    DateTime  @map("spent_on") @db.Date
+  receiptKey String?   @map("receipt_key")
+  createdBy  String    @map("created_by") @db.Uuid
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  group   Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer   User           @relation("ExpensePayer", fields: [payerId], references: [id])
+  creator User           @relation("ExpenseCreator", fields: [createdBy], references: [id])
+  splits  ExpenseSplit[]
+
+  @@index([groupId, spentOn(sort: Desc), id(sort: Desc)])
+  @@map("expenses")
+}
+
+/// One row per person sharing the expense. The amounts always add up to expenses.amount
+/// (checked by a deferred constraint trigger in the database, not only in the service).
+model ExpenseSplit {
+  expenseId String @map("expense_id") @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  amount    BigInt
+  /// What was entered: the amount (exact), basis points (percent) or shares. 1 for equal.
+  value     Int
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@id([expenseId, userId])
+  @@index([userId])
+  @@map("expense_splits")
+}
+
+/// Append-only audit trail of changes to group data.
+model ActivityLog {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  actorId   String   @map("actor_id") @db.Uuid
+  action    String
+  entity    String
+  entityId  String   @map("entity_id") @db.Uuid
+  diff      Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  actor User  @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId, createdAt])
+  @@index([groupId, createdAt])
+  @@map("activity_log")
 }
