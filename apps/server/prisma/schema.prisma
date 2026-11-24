@@ -1,4 +1,4 @@
-// Identity (phase 0), groups (phase 1) and expenses (phase 2). Settlements etc. come later.
+// Identity (phase 0), groups (phase 1), expenses (phase 2) and settling up (phase 3).
 
 generator client {
   provider            = "prisma-client"
@@ -31,12 +31,16 @@ model User {
 
   refreshTokens   RefreshToken[]
   memberships     GroupMember[]
-  createdGroups   Group[]        @relation("GroupCreator")
+  createdGroups   Group[]            @relation("GroupCreator")
   createdInvites  GroupInvite[]
-  paidExpenses    Expense[]      @relation("ExpensePayer")
-  createdExpenses Expense[]      @relation("ExpenseCreator")
+  paidExpenses    Expense[]          @relation("ExpensePayer")
+  createdExpenses Expense[]          @relation("ExpenseCreator")
   expenseSplits   ExpenseSplit[]
   activity        ActivityLog[]
+  paymentAccount  PaymentAccount?
+  paymentsSent    Settlement[]       @relation("SettlementFrom")
+  paymentsGot     Settlement[]       @relation("SettlementTo")
+  transfersIn     SepayTransaction[]
 
   @@map("users")
 }
@@ -78,11 +82,12 @@ model Group {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  creator  User          @relation("GroupCreator", fields: [createdBy], references: [id])
-  members  GroupMember[]
-  invites  GroupInvite[]
-  expenses Expense[]
-  activity ActivityLog[]
+  creator     User          @relation("GroupCreator", fields: [createdBy], references: [id])
+  members     GroupMember[]
+  invites     GroupInvite[]
+  expenses    Expense[]
+  settlements Settlement[]
+  activity    ActivityLog[]
 
   @@map("groups")
 }
@@ -193,4 +198,104 @@ model ActivityLog {
   @@index([entity, entityId, createdAt])
   @@index([groupId, createdAt])
   @@map("activity_log")
+}
+
+/// Where someone wants to be paid. One per person. The account number is personal data:
+/// only the two people in a payment ever see it.
+model PaymentAccount {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  userId           String    @unique @map("user_id") @db.Uuid
+  /// NAPAS bank id (see BANKS in @twg/shared).
+  bankBin          String    @map("bank_bin")
+  accountNumber    String    @map("account_number")
+  /// Capitals without accents, as banks show it.
+  holderName       String    @map("holder_name")
+  /// SHA-256 of the key SePay sends in `Authorization: Apikey <key>`. The key itself is
+  /// shown once and never stored. Null: SePay is not set up.
+  sepayKeyHash     String?   @unique @map("sepay_key_hash")
+  sepayKeyHint     String?   @map("sepay_key_hint")
+  sepayLastEventAt DateTime? @map("sepay_last_event_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions SepayTransaction[]
+
+  @@map("payment_accounts")
+}
+
+enum SettlementStatus {
+  pending
+  confirmed
+  cancelled
+}
+
+enum ConfirmedVia {
+  sepay
+  manual
+}
+
+/// One person paying another back. Only confirmed settlements count in balances, at
+/// `paidAmount` (what actually arrived). A confirmed settlement can never change again
+/// (enforced by a trigger), and settlements are never deleted.
+model Settlement {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  groupId      String           @map("group_id") @db.Uuid
+  fromUserId   String           @map("from_user_id") @db.Uuid
+  toUserId     String           @map("to_user_id") @db.Uuid
+  amount       BigInt
+  paidAmount   BigInt?          @map("paid_amount")
+  currency     Currency
+  paymentCode  String           @unique @map("payment_code")
+  status       SettlementStatus @default(pending)
+  confirmedVia ConfirmedVia?    @map("confirmed_via")
+  createdBy    String           @map("created_by") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  confirmedAt  DateTime?        @map("confirmed_at") @db.Timestamptz(3)
+  cancelledAt  DateTime?        @map("cancelled_at") @db.Timestamptz(3)
+
+  group       Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  from        User              @relation("SettlementFrom", fields: [fromUserId], references: [id])
+  to          User              @relation("SettlementTo", fields: [toUserId], references: [id])
+  transaction SepayTransaction?
+
+  @@index([groupId, createdAt(sort: Desc)])
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
+  @@map("settlements")
+}
+
+enum SepayTransactionStatus {
+  matched
+  unmatched
+  ignored
+}
+
+/// Every incoming transfer SePay told us about, kept as received (it is a bank record, so
+/// it outlives the payment account). The unique (payee, SePay id) pair makes webhook
+/// retries harmless.
+model SepayTransaction {
+  id               String                 @id @default(uuid(7)) @db.Uuid
+  /// The payee: whose account the money arrived in.
+  userId           String                 @map("user_id") @db.Uuid
+  paymentAccountId String?                @map("payment_account_id") @db.Uuid
+  sepayId          BigInt                 @map("sepay_id")
+  accountNumber    String                 @map("account_number")
+  amount           BigInt
+  content          String
+  referenceCode    String?                @map("reference_code")
+  transferredAt    String                 @map("transferred_at")
+  raw              Json
+  status           SepayTransactionStatus
+  settlementId     String?                @unique @map("settlement_id") @db.Uuid
+  receivedAt       DateTime               @default(now()) @map("received_at") @db.Timestamptz(3)
+  resolvedAt       DateTime?              @map("resolved_at") @db.Timestamptz(3)
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account    PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  settlement Settlement?     @relation(fields: [settlementId], references: [id])
+
+  @@unique([userId, sepayId])
+  @@index([userId, status, receivedAt(sort: Desc)])
+  @@map("sepay_transactions")
 }

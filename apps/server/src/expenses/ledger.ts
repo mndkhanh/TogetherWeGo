@@ -4,9 +4,10 @@ import type { Prisma } from '../generated/prisma/client.js';
 type Db = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
 /**
- * Net balance per person in a group, derived from expenses (never stored).
- * Positive: the group owes them. Negative: they owe. Every group sums to 0.
- * Phase 3 adds confirmed settlements to this query.
+ * Net balance per person in a group, derived from expenses and confirmed payments (never
+ * stored). Positive: the group owes them. Negative: they owe. Every group sums to 0.
+ * A payment counts at what actually arrived (paid_amount): paying moves the payer up and
+ * the payee down.
  */
 export async function netBalances(db: Db, groupId: string): Promise<Map<string, number>> {
   const rows = await db.$queryRaw<{ user_id: string; net: bigint }[]>`
@@ -20,6 +21,14 @@ export async function netBalances(db: Db, groupId: string): Promise<Map<string, 
       FROM expense_splits s
       JOIN expenses e ON e.id = s.expense_id
       WHERE e.group_id = ${groupId}::uuid AND e.deleted_at IS NULL
+      UNION ALL
+      SELECT from_user_id, paid_amount
+      FROM settlements
+      WHERE group_id = ${groupId}::uuid AND status = 'confirmed'
+      UNION ALL
+      SELECT to_user_id, -paid_amount
+      FROM settlements
+      WHERE group_id = ${groupId}::uuid AND status = 'confirmed'
     ) AS ledger
     GROUP BY user_id`;
   return new Map(rows.map((row) => [row.user_id, Number(row.net)]));
@@ -67,4 +76,22 @@ export async function lockGroup(
           WHERE id = ${groupId}::uuid FOR UPDATE`;
   const row = rows[0];
   return row ? { currency: row.currency, archived: row.archived_at !== null } : null;
+}
+
+/**
+ * Locks the membership rows of the people in a payment (FOR SHARE), whether or not they are
+ * still active, and returns who is active. Leaving takes FOR UPDATE on the same rows, so a
+ * payment can't be confirmed in the middle of someone leaving.
+ */
+export async function lockMemberships(
+  db: Db,
+  groupId: string,
+  userIds: string[],
+): Promise<Set<string>> {
+  const rows = await db.$queryRaw<{ user_id: string; active: boolean }[]>`
+    SELECT user_id, (left_at IS NULL) AS active FROM group_members
+    WHERE group_id = ${groupId}::uuid AND user_id = ANY(${userIds}::uuid[])
+    ORDER BY user_id
+    FOR SHARE`;
+  return new Set(rows.filter((row) => row.active).map((row) => row.user_id));
 }

@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import type { MeResponse } from "@twg/shared"
-import { LogOutIcon } from "lucide-react"
+import { BanknoteIcon, LogOutIcon } from "lucide-react"
 import * as React from "react"
+import { useNavigate } from "react-router"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -33,6 +34,7 @@ export function useMe(): MeResponse {
 
 function AccountMenu({ user }: { user: MeResponse }) {
   const { logout } = useAuth()
+  const navigate = useNavigate()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -50,6 +52,13 @@ function AccountMenu({ user }: { user: MeResponse }) {
             <div className="truncate font-medium text-foreground">{user.name}</div>
             <div className="truncate font-normal">{user.email}</div>
           </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => void navigate("/settings/payments")}>
+            <BanknoteIcon />
+            Getting paid
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>

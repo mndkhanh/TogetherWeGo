@@ -9,6 +9,7 @@ import { GroupPage } from "@/pages/group-page"
 import { HomePage } from "@/pages/home-page"
 import { InvitePage } from "@/pages/invite-page"
 import { LoginPage } from "@/pages/login-page"
+import { PaymentSettingsPage } from "@/pages/payment-settings-page"
 import { RegisterPage } from "@/pages/register-page"
 
 function FullPageSpinner() {
@@ -53,6 +54,7 @@ export function App() {
           <Route index element={<HomePage />} />
           <Route path="groups/:groupId" element={<GroupPage />} />
           <Route path="invite/:code" element={<InvitePage />} />
+          <Route path="settings/payments" element={<PaymentSettingsPage />} />
         </Route>
         <Route element={<GuestOnly />}>
           <Route path="login" element={<LoginPage />} />

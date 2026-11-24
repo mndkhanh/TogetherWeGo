@@ -28,11 +28,12 @@ export function useGroups() {
   })
 }
 
-export function useGroup(groupId: string) {
+export function useGroup(groupId: string, enabled = true) {
   return useQuery({
     queryKey: groupKeys.detail(groupId),
     queryFn: () => api<GroupDetailResponse>(`/groups/${groupId}`),
     retry: false,
+    enabled,
   })
 }
 

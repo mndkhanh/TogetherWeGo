@@ -22,6 +22,8 @@ import { ExpenseList } from "@/components/expenses/expense-list"
 import { EditGroupDialog } from "@/components/group/edit-group-dialog"
 import { InviteCard } from "@/components/group/invite-card"
 import { MembersCard } from "@/components/group/members-card"
+import { type PaymentDraft, PaymentDialog } from "@/components/payments/payment-dialog"
+import { PaymentsList } from "@/components/payments/payments-list"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -95,6 +97,8 @@ export function GroupPage() {
   const [addingExpense, setAddingExpense] = React.useState(false)
   const [editingExpense, setEditingExpense] = React.useState<ExpenseDetailResponse | null>(null)
   const [openExpenseId, setOpenExpenseId] = React.useState<string | null>(null)
+  const [paymentDraft, setPaymentDraft] = React.useState<PaymentDraft | null>(null)
+  const [openPaymentId, setOpenPaymentId] = React.useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = searchParams.get("tab") ?? "expenses"
 
@@ -278,7 +282,12 @@ export function GroupPage() {
           />
         </TabsContent>
         <TabsContent value="balances">
-          <BalancesPanel groupId={data.id} myUserId={me.id} />
+          <BalancesPanel
+            groupId={data.id}
+            myUserId={me.id}
+            onPay={setPaymentDraft}
+            payments={<PaymentsList groupId={data.id} myUserId={me.id} onOpen={setOpenPaymentId} />}
+          />
         </TabsContent>
         <TabsContent value="members">
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -319,6 +328,17 @@ export function GroupPage() {
         onConfirm={setConfirm}
       />
       {isAdmin && <EditGroupDialog group={data} open={editing} onOpenChange={setEditing} />}
+      <PaymentDialog
+        groupId={data.id}
+        currency={data.currency}
+        myUserId={me.id}
+        draft={paymentDraft}
+        settlementId={openPaymentId}
+        onClose={() => {
+          setPaymentDraft(null)
+          setOpenPaymentId(null)
+        }}
+      />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </AppShell>
   )

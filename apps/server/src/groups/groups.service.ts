@@ -79,10 +79,13 @@ export class GroupsService {
       // the first expense can't be saved in the old currency while it changes.
       const locked = await lockGroup(tx, groupId, 'update');
       if (input.currency && input.currency !== locked?.currency) {
-        const hasExpenses = await tx.expense.count({ where: { groupId, deletedAt: null } });
-        if (hasExpenses > 0) {
+        const [expenses, settlements] = await Promise.all([
+          tx.expense.count({ where: { groupId, deletedAt: null } }),
+          tx.settlement.count({ where: { groupId } }),
+        ]);
+        if (expenses + settlements > 0) {
           throw new ConflictException(
-            'You can’t change the currency after expenses have been added',
+            'You can’t change the currency after expenses or payments have been added',
           );
         }
       }
@@ -128,13 +131,30 @@ export class GroupsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      // Lock the membership first: adding an expense for this person takes FOR SHARE on the
-      // same row, so the balance can't change between this check and leaving.
+      // Lock the membership first: adding an expense or confirming a payment for this person
+      // takes FOR SHARE on the same row, so the balance can't change between this check and
+      // leaving.
       const [row] = await tx.$queryRaw<{ name: string }[]>`
         SELECT u.name FROM group_members m JOIN users u ON u.id = m.user_id
         WHERE m.group_id = ${groupId}::uuid AND m.user_id = ${targetId}::uuid AND m.left_at IS NULL
         FOR UPDATE OF m`;
       if (!row) throw new NotFoundException('That person is not a member of this group');
+
+      // A payment still waiting for confirmation would change the balance after they left.
+      const pending = await tx.settlement.count({
+        where: {
+          groupId,
+          status: 'pending',
+          OR: [{ fromUserId: targetId }, { toUserId: targetId }],
+        },
+      });
+      if (pending > 0) {
+        throw new ConflictException(
+          leaving
+            ? 'You have a payment waiting to be confirmed or cancelled in this group. Sort it out before you leave.'
+            : `${row.name} has a payment waiting to be confirmed or cancelled. Sort it out before removing them.`,
+        );
+      }
 
       const net = (await netBalances(tx, groupId)).get(targetId) ?? 0;
       if (net !== 0) {

@@ -1,7 +1,9 @@
 import type { BalancesResponse } from "@twg/shared"
 import { ArrowRightIcon } from "lucide-react"
+import type * as React from "react"
 
 import { PersonAvatar } from "@/components/member-avatars"
+import type { PaymentDraft } from "@/components/payments/payment-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,7 +23,19 @@ function headline(balances: BalancesResponse, myUserId: string): { title: string
   return { title: "You're settled up", tone: "" }
 }
 
-export function BalancesPanel({ groupId, myUserId }: { groupId: string; myUserId: string }) {
+export function BalancesPanel({
+  groupId,
+  myUserId,
+  onPay,
+  payments,
+}: {
+  groupId: string
+  myUserId: string
+  /** Start paying (or recording a payment for) one of the suggested transfers. */
+  onPay: (draft: PaymentDraft) => void
+  /** The group's payments, shown under the suggestions. */
+  payments: React.ReactNode
+}) {
   const balances = useBalances(groupId)
 
   if (balances.isPending) {
@@ -74,6 +88,9 @@ export function BalancesPanel({ groupId, myUserId }: { groupId: string; myUserId
             <ul className="flex flex-col divide-y rounded-lg border">
               {[...mine, ...others].map((t) => {
                 const involvesMe = mine.includes(t)
+                const from = names.get(t.fromUserId)
+                const to = names.get(t.toUserId)
+                const draft = from && to ? { from, to, amount: t.amount } : null
                 return (
                   <li
                     key={`${t.fromUserId}-${t.toUserId}`}
@@ -94,50 +111,62 @@ export function BalancesPanel({ groupId, myUserId }: { groupId: string; myUserId
                     >
                       {money(t.amount, data.currency)}
                     </span>
+                    {involvesMe && draft && (
+                      <Button
+                        size="sm"
+                        variant={t.fromUserId === myUserId ? "default" : "outline"}
+                        onClick={() => onPay(draft)}
+                      >
+                        {t.fromUserId === myUserId ? "Pay" : "Record"}
+                      </Button>
+                    )}
                   </li>
                 )
               })}
             </ul>
           )}
           <p className="text-sm text-muted-foreground">
-            The fewest transfers that settle everyone up. Pay each other however you usually do,
-            then delete or adjust expenses if something was wrong.
+            The fewest transfers that settle everyone up. Money goes straight from one bank to the
+            other; a payment counts once the person paid confirms it, or their bank does.
           </p>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Everyone's balance</CardTitle>
-          <CardDescription>What each person paid, minus their share.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="flex flex-col gap-3">
-            {data.members.map((member) => (
-              <li key={member.userId} className="flex items-center gap-3 text-sm">
-                <PersonAvatar person={member} size="sm" />
-                <span className="flex min-w-0 flex-1 items-center gap-2">
-                  <span className="truncate">
-                    {member.userId === myUserId ? `${member.name} (you)` : member.name}
+      <div className="flex flex-col gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Everyone's balance</CardTitle>
+            <CardDescription>What each person paid, minus their share.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="flex flex-col gap-3">
+              {data.members.map((member) => (
+                <li key={member.userId} className="flex items-center gap-3 text-sm">
+                  <PersonAvatar person={member} size="sm" />
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="truncate">
+                      {member.userId === myUserId ? `${member.name} (you)` : member.name}
+                    </span>
+                    {!member.active && <Badge variant="outline">Left</Badge>}
                   </span>
-                  {!member.active && <Badge variant="outline">Left</Badge>}
-                </span>
-                <span
-                  className={cn(
-                    "tabular-nums",
-                    member.net > 0 && "text-primary",
-                    member.net < 0 && "text-destructive",
-                    member.net === 0 && "text-muted-foreground"
-                  )}
-                >
-                  {member.net > 0 ? "+" : member.net < 0 ? "−" : ""}
-                  {money(Math.abs(member.net), data.currency)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+                  <span
+                    className={cn(
+                      "tabular-nums",
+                      member.net > 0 && "text-primary",
+                      member.net < 0 && "text-destructive",
+                      member.net === 0 && "text-muted-foreground"
+                    )}
+                  >
+                    {member.net > 0 ? "+" : member.net < 0 ? "−" : ""}
+                    {money(Math.abs(member.net), data.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+        {payments}
+      </div>
     </div>
   )
 }

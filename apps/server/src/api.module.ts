@@ -9,6 +9,7 @@ import { HealthController } from './health/health.controller.js';
 import { APP_CONFIG, AppConfigModule } from './infra/config/app-config.module.js';
 import type { AppConfig } from './infra/config/env.schema.js';
 import { LoggerModule } from './infra/logger/logger.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { RedisModule } from './infra/redis/redis.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module.js';
     UsersModule,
     GroupsModule,
     ExpensesModule,
+    PaymentsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

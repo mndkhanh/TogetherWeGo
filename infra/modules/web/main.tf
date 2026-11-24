@@ -150,7 +150,8 @@ resource "aws_cloudfront_response_headers_policy" "security" {
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
-        join(" ", concat(["img-src 'self' data: blob: https://*.googleusercontent.com"], var.upload_origins)),
+        # qr.sepay.vn draws the VietQR code on the payment screen.
+        join(" ", concat(["img-src 'self' data: blob: https://*.googleusercontent.com https://qr.sepay.vn"], var.upload_origins)),
         "font-src 'self'",
         join(" ", concat(["connect-src 'self'"], var.upload_origins)),
         "frame-ancestors 'none'",

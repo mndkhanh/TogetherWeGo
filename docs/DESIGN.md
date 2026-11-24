@@ -1,6 +1,6 @@
 # TogetherWeGo — Product & Architecture Draft
 
-> Status: **v0.5** (2026-11-24). Phases 0 (skeleton), 1 (groups) and 2 (expenses) are built; see the README for running it. Later phases are still a draft.
+> Status: **v0.6** (2026-11-25). Phases 0 (skeleton), 1 (groups), 2 (expenses) and 3 (settle up) are built; see the README for running it. Later phases are still a draft.
 > Changes from v0.1: payments via **SePay**; **non-serverless** architecture (long-running containers on ECS/EC2 + RDS Postgres + Redis).
 
 ## 1. What it is
@@ -125,17 +125,24 @@ expense_splits(expense_id, user_id, amount BIGINT CHECK >= 0, value INT,
    -- SUM(splits.amount) = expenses.amount: checked by the service AND by a deferred
    --   constraint trigger at COMMIT, so a bug can't save unbalanced money
 
-settlements(id, group_id, from_user_id, to_user_id, amount BIGINT,
-            payment_code UNIQUE, status ENUM(pending,confirmed,expired,cancelled),
-            confirmed_by ENUM(sepay,manual) NULL, sepay_tx_id NULL,
-            created_at, confirmed_at, expires_at)
+settlements(id, group_id, from_user_id, to_user_id, amount BIGINT, paid_amount BIGINT NULL,
+            currency, payment_code UNIQUE, status ENUM(pending,confirmed,cancelled),
+            confirmed_via ENUM(sepay,manual) NULL, created_by,
+            created_at, confirmed_at, cancelled_at)
+   -- amount = what was asked for; paid_amount = what actually arrived (balances use this)
+   -- CHECKs: amounts > 0, not to self, code format, each status has exactly its fields
+   -- trigger: confirmed rows never change; only status moves forward; never deleted
+   -- "stale" (pending > 7 days) is derived, not stored; a late transfer still matches
 
-payment_accounts(id, user_id, bank_code, account_number, holder_name,
-                 sepay_connected BOOL, sepay_secret_ref, is_default)
-sepay_transactions(id PK  -- SePay's id, used for dedupe
-                   , account_number, amount BIGINT, content, reference_code,
-                   transfer_type, raw JSONB, matched_settlement_id NULL,
-                   status ENUM(matched,unmatched,ignored), received_at)
+payment_accounts(id, user_id UNIQUE, bank_bin, account_number, holder_name,
+                 sepay_key_hash UNIQUE NULL, sepay_key_hint, sepay_last_event_at)
+   -- one account per person; the SePay key itself is shown once and never stored
+sepay_transactions(id, user_id (payee), payment_account_id NULL, sepay_id,
+                   account_number, amount BIGINT, content, reference_code, transferred_at,
+                   raw JSONB, status ENUM(matched,unmatched,ignored), settlement_id UNIQUE NULL,
+                   received_at, resolved_at,
+                   UNIQUE(user_id, sepay_id))   -- dedupe of SePay retries
+   -- a bank record: kept when the payment account is removed
 
 notifications(id, user_id, type, payload JSONB, read_at, created_at)
 outbox(id, type, payload JSONB, created_at, processed_at)   -- see §6
@@ -176,13 +183,15 @@ DELETE /expenses/:id                (soft delete)
 POST   /groups/:id/receipts         (presigned S3 POST: key, type and max size pinned)
 
 GET    /groups/:id/balances         (net + simplified "who pays whom")
-POST   /groups/:id/settlements      (creates PENDING settlement + payment code, returns QR URL)
-GET    /settlements/:id
-PATCH  /settlements/:id             (manual confirm by payee, cancel by payer)
+GET    /groups/:id/settlements      POST /groups/:id/settlements
+       (payer: PENDING + payment code; payee recording cash: CONFIRMED straight away)
+GET    /settlements/:id             (payee bank details + QR only for the two people, only while pending)
+POST   /settlements/:id/confirm     (payee only; optional amount that actually arrived)
+POST   /settlements/:id/cancel      (either side, pending only)
 
-GET    /me/payment-accounts         POST /me/payment-accounts   DELETE /me/payment-accounts/:id
-GET    /integrations/sepay/connect  GET  /integrations/sepay/callback
-GET    /me/unmatched-transfers      POST /me/unmatched-transfers/:id/assign
+GET    /me/payment-account          PUT /me/payment-account     DELETE /me/payment-account
+POST   /me/payment-account/sepay-key   DELETE /me/payment-account/sepay-key   (key shown once)
+GET    /me/unmatched-transfers      POST /me/unmatched-transfers/:id/assign   POST .../:id/ignore
 
 GET    /notifications               PATCH /notifications/:id/read   POST /notifications/read-all
 
@@ -207,7 +216,7 @@ Guards: `JwtAuthGuard` everywhere except auth and webhooks. `GroupMemberGuard` a
    - enqueues an `email` job (SES) if the user wants email for that type. Noisy types are batched into a digest.
 4. **Event reminders:** on event create or update, add BullMQ **delayed jobs** with deterministic IDs (`event:<id>:24h`, `event:<id>:1h`). On reschedule or cancel, remove and re-add them. The job re-checks the event status before sending.
 5. **Debt reminders:** a BullMQ **repeatable job** (e.g. Monday 9:00 Asia/Ho_Chi_Minh) finds non-zero balances and notifies debtors, with a per-pair cooldown.
-6. **Settlement expiry:** a repeatable job marks `pending` settlements past `expires_at` as `expired`.
+6. **Stale payments:** not a job. A pending payment older than 7 days is shown as stale (derived on read); a late transfer still confirms it, because the money really moved.
 
 Notification types: `group.invited`, `group.member_joined`, `event.created`, `event.updated`, `event.cancelled`, `event.reminder`, `expense.added`, `expense.updated`, `settlement.requested`, `settlement.confirmed`, `debt.reminder`, `transfer.unmatched`.
 
@@ -225,7 +234,7 @@ Money goes **directly to the payee's own bank account**. The app only creates th
 | Has bank account, no SePay | Scan QR → pay | Payee taps "I received it" (manual) |
 | No bank account added | "Ask X to add bank info" | Manual only |
 
-**Connect flow:** OAuth2 with SePay → tokens stored in Secrets Manager → we call SePay's Webhooks API (`POST /api/v1/webhooks`) to register our endpoint on the user's SePay account with a per-user generated API key. If OAuth app approval is slow, the fallback is that the user creates the webhook in SePay's dashboard and pastes in our URL and the API key we show them.
+**Connect flow (built, manual):** the payee taps "Set up SePay"; we generate a random 256-bit API key, show it once with our webhook URL, and keep only its SHA-256. The payee adds a webhook in SePay's dashboard (auth type "API Key", event "money in"). Changing the bank account or turning SePay off invalidates the key. No SePay credentials of the user are ever stored. OAuth2 with SePay's Webhooks API is a possible later upgrade.
 
 ### Settle-up flow
 
@@ -234,22 +243,26 @@ Money goes **directly to the payee's own bank account**. The app only creates th
 3. Frontend shows the SePay QR (payee account, exact amount, `des=TWG8K3F2Q`), plus copy buttons, and listens on Socket.IO for `settlement.updated`.
 4. Payer transfers from their bank app.
 5. SePay → `POST /v1/webhooks/sepay`. The controller:
-   - verifies the `Authorization: Apikey <key>` header against the payee's key (looked up by `accountNumber`); constant-time compare
+   - verifies the `Authorization: Apikey <key>` header by looking up the key's SHA-256 (no secret to compare in memory), then requires the payload's `accountNumber` (or `subAccount`) to be that payee's account
    - ignores `transferType != "in"`
    - **dedupes** with `INSERT INTO sepay_transactions … ON CONFLICT (id) DO NOTHING`
    - extracts the payment code from `content` with a regex (banks sometimes add text, so search rather than exact-match)
-   - in one DB transaction: lock the settlement, check that the amount and the payee account match, set it to `confirmed`, write an `outbox` row
+   - in one DB transaction: lock the settlement **owed to this key's owner** (`FOR UPDATE`) and both memberships (`FOR SHARE`, so it can't interleave with leaving), confirm it at the amount that arrived, link the transfer, write the activity log (the outbox row arrives with Phase 5)
    - responds `200 {"success": true}` fast; SePay retries failed deliveries about 7 times over about 30 minutes, so the handler must be idempotent
-6. The worker notifies payer and payee, and the payer's open QR screen flips to "Paid ✓" in real time.
+6. The payer's open QR screen polls every 4 s and flips to "Paid" (Socket.IO push and notifications arrive with Phase 5).
 7. Edge cases:
    - **Underpaid** → partial settlement; the remaining debt stays open.
    - **Overpaid** → confirm the debt and credit the excess to the balance.
    - **No or unknown code** → the transfer lands in the payee's "unmatched transfers" inbox so they can assign it manually.
+   - **Cancelled payment, or the payer has left** → still confirmed: real money moved, so the record must say so.
+   - **Already confirmed** (manual confirm won the race) → the transfer goes to the inbox rather than counting twice.
 
 ### Security
 
 - The webhook route is public. Rate-limit it (Redis), validate the body, and log the raw payload.
-- SePay API keys are random 32+ bytes, stored as a hash for lookup and the secret in Secrets Manager. Never log them.
+- SePay API keys are random 32 bytes, stored only as a SHA-256 hash (high entropy, so no KDF needed). The `Authorization` header is redacted from logs.
+- A key only speaks for its owner: a webhook can only confirm payments owed to the key's owner, into that owner's account. Another user's valid key gets `unmatched` or `ignored`, never a confirmation.
+- Leaving a group is refused while a payment involving you is pending.
 - Only the webhook or the payee's own manual confirm can confirm a settlement. Never trust the client.
 - Bank account numbers are PII. Show them only to members of shared groups.
 
@@ -288,7 +301,7 @@ TogetherWeGo/
 | 0. Skeleton ✅ | Monorepo, docker compose local stack, NestJS + Prisma + auth (email/password, Google), React shell, Terraform for dev env, CI + deploy pipeline |
 | 1. Groups ✅ | Groups, roles (owner/admin/member), ownership transfer, archive, invite links with expiry, use limits and revoke. Email invites wait for Phase 5. |
 | 2. Money ✅ | Expenses (equal / exact / percent / shares), balances with suggested payments, receipt photos on S3, edit history, optimistic locking. Leaving needs a zero balance. |
-| 3. Settle up | Bank accounts, SePay QR, settlements, webhook auto-confirm, manual confirm, unmatched inbox |
+| 3. Settle up ✅ | Bank accounts, SePay QR, settlements (pay, record cash, partial/over payment), webhook auto-confirm, manual confirm, unmatched inbox |
 | 4. Events | Events, RSVP, comments, link expenses to events |
 | 5. Notifications | Outbox → BullMQ → in-app feed + Socket.IO + SES email, preferences |
 | 6. Reminders | Delayed and repeatable jobs for event and debt reminders |
@@ -296,7 +309,7 @@ TogetherWeGo/
 
 ## 11. Open questions
 
-1. **SePay connection:** is OAuth2 app registration with SePay available to us, or do we start with the manual webhook setup?
+1. ~~SePay connection~~ — decided: manual webhook setup with a per-user API key we generate (OAuth2 later, if SePay approves an app).
 2. **Default currency:** VND? Is multi-currency within one group needed in v1?
 3. ~~Who can edit or delete an expense~~ — decided: the person who added it, the person who paid, or a group admin/owner. Expenses involving someone who has left are frozen.
 4. **Group size:** what is the expected max number of members?

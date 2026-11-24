@@ -84,5 +84,12 @@ aws ssm start-session --target <instance-id>            # shell on an ECS instan
 - Receipt photos go straight from the browser to a private S3 bucket through presigned POSTs that pin the
   key, type and size; the API checks a key belongs to the group before attaching it, and photos are viewed
   through 5-minute presigned links. The task role can only read and write `receipts/*`.
+- Payments never pass through the app: money goes bank to bank. Only the person being paid (or their bank, via
+  SePay) can confirm a payment; the person who owes can't mark their own debt as paid. A confirmed payment can
+  never change and payments are never deleted (database trigger).
+- The SePay webhook is public, so it trusts nothing until a per-user API key checks out. Only the key's SHA-256
+  is stored, and a key can only confirm payments to its own owner, so a forged webhook from one user's SePay
+  can't settle someone else's debt. Retries are idempotent (unique SePay id per payee).
+- Bank account numbers are shown only to the two people in a pending payment.
 - Access tokens live in memory only; refresh tokens are httpOnly, `SameSite=Lax`, scoped to `/v1/auth`,
   rotated on every use, with reuse detection that revokes the whole session family.
