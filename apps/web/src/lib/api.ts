@@ -25,6 +25,11 @@ export function setAccessToken(token: string | null): void {
   accessToken = token
 }
 
+/** For the realtime socket, which sends the token in its handshake rather than a header. */
+export function getAccessToken(): string | null {
+  return accessToken
+}
+
 async function parseError(res: Response): Promise<ApiError> {
   const body = (await res.json().catch(() => ({}))) as {
     message?: unknown

@@ -18,7 +18,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/v1": { target: API_TARGET, xfwd: true },
+      // ws: the realtime notifications socket lives under /v1/realtime.
+      "/v1": { target: API_TARGET, xfwd: true, ws: true },
     },
   },
 })

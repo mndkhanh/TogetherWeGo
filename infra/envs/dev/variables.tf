@@ -20,6 +20,18 @@ variable "initial_image_tag" {
   default     = "bootstrap"
 }
 
+variable "mail_from" {
+  description = "Sender of notification emails. Must belong to the SES identity below."
+  type        = string
+  default     = "TogetherWeGo <no-reply@example.com>"
+}
+
+variable "ses_identity_arn" {
+  description = "ARN of a verified SES domain or address. Empty until a domain is chosen (open question 7): emails then fail and are retried, the in-app feed still works."
+  type        = string
+  default     = ""
+}
+
 variable "google_client_id" {
   type    = string
   default = ""

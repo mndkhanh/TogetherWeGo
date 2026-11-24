@@ -8,7 +8,9 @@ import {
 } from '@twg/shared';
 import { parseOrThrow } from '../common/zod-validation.pipe.js';
 import { lockMemberships } from '../expenses/ledger.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
+import { OutboxService } from '../notifications/outbox.service.js';
 import { hashSepayKey } from './payment-mappers.js';
 import { SettlementsService } from './settlements.service.js';
 
@@ -28,6 +30,7 @@ export class SepayWebhookService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settlements: SettlementsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async handle(authorization: string | undefined, body: unknown): Promise<WebhookOutcome> {
@@ -57,7 +60,7 @@ export class SepayWebhookService {
       return 'ignored';
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx) => {
       // 4. Record it once. A retry of the same transaction inserts nothing and stops here.
       const id = randomUUID();
       const inserted = await tx.sepayTransaction.createMany({
@@ -82,9 +85,9 @@ export class SepayWebhookService {
 
       // 5. Find the payment it is for: its code, owed to this account's owner, not yet confirmed.
       // Over the per-payment limit: keep the record, but let the payee look at it themselves.
-      if (input.transferAmount > MAX_AMOUNT.VND) return 'unmatched' as const;
+      if (input.transferAmount > MAX_AMOUNT.VND) return this.unmatched(tx, account.userId, input);
       const codes = codesIn(input);
-      if (codes.length === 0) return 'unmatched' as const;
+      if (codes.length === 0) return this.unmatched(tx, account.userId, input);
       const [settlement] = await tx.$queryRaw<
         { id: string; group_id: string; from_user_id: string; to_user_id: string }[]
       >`
@@ -96,7 +99,7 @@ export class SepayWebhookService {
         ORDER BY created_at
         LIMIT 1
         FOR UPDATE`;
-      if (!settlement) return 'unmatched' as const;
+      if (!settlement) return this.unmatched(tx, account.userId, input);
 
       // Real money moved, so this confirms even a cancelled payment, or one where someone
       // has since left the group. The lock just keeps it from interleaving with leaving.
@@ -112,6 +115,24 @@ export class SepayWebhookService {
       );
       return 'matched' as const;
     });
+    if (outcome !== 'duplicate') this.outbox.kick();
+    return outcome;
+  }
+
+  /** Kept for the payee to sort out, and they're told about it. */
+  private async unmatched(
+    tx: Prisma.TransactionClient,
+    payeeId: string,
+    input: SepayWebhookInput,
+  ): Promise<'unmatched'> {
+    await this.outbox.add(tx, {
+      type: 'transfer.unmatched',
+      groupId: null,
+      actorId: null,
+      audience: { kind: 'users', userIds: [payeeId] },
+      data: { amount: input.transferAmount, currency: 'VND' },
+    });
+    return 'unmatched';
   }
 }
 

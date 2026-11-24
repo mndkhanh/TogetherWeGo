@@ -75,6 +75,17 @@ variable "aws_region" {
   type = string
 }
 
+variable "mail_from" {
+  description = "Sender of notification emails, e.g. TogetherWeGo <no-reply@example.com>"
+  type        = string
+}
+
+variable "ses_identity_arn" {
+  description = "Verified SES identity (domain or address) the worker may send from. Empty: no SES access."
+  type        = string
+  default     = ""
+}
+
 variable "api_desired_count" {
   type    = number
   default = 2
@@ -157,7 +168,7 @@ resource "aws_iam_role_policy" "execution_secrets" {
   policy = data.aws_iam_policy_document.execution_secrets.json
 }
 
-# Task role: what the application code itself may call. SES comes later.
+# Task role: what the application code itself may call (API and migrations).
 resource "aws_iam_role" "task" {
   name               = "${var.name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
@@ -178,6 +189,33 @@ resource "aws_iam_role_policy" "task_receipts" {
   policy = data.aws_iam_policy_document.task_receipts.json
 }
 
+# The worker gets its own role: it sends email and the API never needs to. It has no S3 access.
+resource "aws_iam_role" "worker_task" {
+  name               = "${var.name}-worker-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+# SES: send only, only from the verified identity, only as the configured sender.
+data "aws_iam_policy_document" "worker_ses" {
+  count = var.ses_identity_arn == "" ? 0 : 1
+  statement {
+    actions   = ["ses:SendEmail"]
+    resources = [var.ses_identity_arn]
+    condition {
+      test     = "StringLike"
+      variable = "ses:FromAddress"
+      values   = [local.mail_from_address]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "worker_ses" {
+  count  = var.ses_identity_arn == "" ? 0 : 1
+  name   = "send-email"
+  role   = aws_iam_role.worker_task.id
+  policy = data.aws_iam_policy_document.worker_ses[0].json
+}
+
 # ---------- Logs ----------
 
 resource "aws_cloudwatch_log_group" "this" {
@@ -189,6 +227,9 @@ resource "aws_cloudwatch_log_group" "this" {
 # ---------- Task definitions ----------
 
 locals {
+  # "Name <addr@example.com>" -> "addr@example.com", for the SES condition.
+  mail_from_address = try(regex("<([^>]+)>", var.mail_from)[0], var.mail_from)
+
   environment = concat(
     [
       { name = "NODE_ENV", value = "production" },
@@ -203,6 +244,7 @@ locals {
       { name = "TRUST_PROXY_HOPS", value = "2" },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "RECEIPTS_BUCKET", value = var.receipts_bucket_name },
+      { name = "MAIL_FROM", value = var.mail_from },
     ],
     local.google_enabled ? [{ name = "GOOGLE_CLIENT_ID", value = var.google_client_id }] : [],
   )
@@ -267,7 +309,7 @@ resource "aws_ecs_task_definition" "this" {
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  task_role_arn            = each.key == "worker" ? aws_iam_role.worker_task.arn : aws_iam_role.task.arn
 
   runtime_platform {
     cpu_architecture        = "ARM64"
@@ -358,7 +400,7 @@ output "service_names" {
 
 output "task_role_arns" {
   description = "Roles the deploy pipeline must be allowed to pass to ECS"
-  value       = [aws_iam_role.execution.arn, aws_iam_role.task.arn]
+  value       = [aws_iam_role.execution.arn, aws_iam_role.task.arn, aws_iam_role.worker_task.arn]
 }
 
 output "log_group_names" {

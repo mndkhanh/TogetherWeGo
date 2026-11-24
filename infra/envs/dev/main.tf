@@ -80,6 +80,8 @@ module "services" {
   receipts_bucket_name   = module.storage.bucket_name
   receipts_bucket_arn    = module.storage.bucket_arn
   aws_region             = data.aws_region.current.region
+  mail_from              = var.mail_from
+  ses_identity_arn       = var.ses_identity_arn
 }
 
 module "github_oidc" {

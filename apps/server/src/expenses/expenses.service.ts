@@ -25,6 +25,7 @@ import { parseOrThrow } from '../common/zod-validation.pipe.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { GroupAccessService } from '../groups/group-access.service.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
+import { OutboxService } from '../notifications/outbox.service.js';
 import {
   canEditExpense,
   describeChanges,
@@ -49,6 +50,7 @@ export class ExpensesService {
     private readonly prisma: PrismaService,
     private readonly access: GroupAccessService,
     private readonly receipts: ReceiptsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async list(
@@ -125,8 +127,10 @@ export class ExpensesService {
       await this.log(tx, groupId, userId, 'expense.created', expense.id, {
         after: snapshotOf(expense),
       });
+      await this.notify(tx, 'expense.added', userId, expense, [expense.payerId]);
       return expense.id;
     });
+    this.outbox.kick();
     return this.get(expenseId, userId);
   }
 
@@ -180,7 +184,11 @@ export class ExpensesService {
         before: snapshotOf(expense),
         after: snapshotOf(after),
       });
+      // Everyone who was on it before or is on it now hears about the change.
+      const before = [expense.payerId, ...expense.splits.map((s) => s.userId)];
+      await this.notify(tx, 'expense.updated', userId, after, before);
     });
+    this.outbox.kick();
     return this.get(expenseId, userId);
   }
 
@@ -206,7 +214,9 @@ export class ExpensesService {
       await this.log(tx, expense.groupId, userId, 'expense.deleted', expenseId, {
         before: snapshotOf(expense),
       });
+      await this.notify(tx, 'expense.deleted', userId, expense, []);
     });
+    this.outbox.kick();
   }
 
   async balances(groupId: string, userId: string): Promise<BalancesResponse> {
@@ -342,6 +352,45 @@ export class ExpensesService {
       throw new BadRequestException('Everyone on an expense must be a member of the group');
     }
     return active;
+  }
+
+  /** The people on an expense (payer and everyone sharing it), each told their own share. */
+  private async notify(
+    tx: Prisma.TransactionClient,
+    type: 'expense.added' | 'expense.updated' | 'expense.deleted',
+    actorId: string,
+    expense: {
+      id: string;
+      groupId: string;
+      title: string;
+      amount: bigint;
+      currency: Currency;
+      payerId: string;
+      splits: { userId: string; amount: bigint }[];
+    },
+    alsoTell: string[],
+  ): Promise<void> {
+    const involved = [expense.payerId, ...expense.splits.map((s) => s.userId), ...alsoTell];
+    await this.outbox.add(tx, {
+      type,
+      groupId: expense.groupId,
+      actorId,
+      audience: { kind: 'users', userIds: [...new Set(involved)] },
+      data: {
+        groupId: expense.groupId,
+        ...(await this.outbox.names(tx, expense.groupId, actorId)),
+        expenseId: expense.id,
+        title: expense.title,
+        amount: Number(expense.amount),
+        currency: expense.currency,
+      },
+      perUser:
+        type === 'expense.deleted'
+          ? undefined
+          : Object.fromEntries(
+              expense.splits.map((s) => [s.userId, { yourShare: Number(s.amount) }]),
+            ),
+    });
   }
 
   private async log(

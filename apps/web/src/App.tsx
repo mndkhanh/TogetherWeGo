@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "rea
 
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/lib/auth"
+import { useRealtime } from "@/lib/notifications"
 import { clearReturnTo, peekReturnTo, rememberReturnTo } from "@/lib/return-to"
 import { AuthCallbackPage } from "@/pages/auth-callback-page"
 import { EventPage } from "@/pages/event-page"
@@ -10,6 +11,8 @@ import { GroupPage } from "@/pages/group-page"
 import { HomePage } from "@/pages/home-page"
 import { InvitePage } from "@/pages/invite-page"
 import { LoginPage } from "@/pages/login-page"
+import { NotificationSettingsPage } from "@/pages/notification-settings-page"
+import { NotificationsPage } from "@/pages/notifications-page"
 import { PaymentSettingsPage } from "@/pages/payment-settings-page"
 import { RegisterPage } from "@/pages/register-page"
 
@@ -26,6 +29,8 @@ function RequireAuth() {
   const { state } = useAuth()
   const location = useLocation()
   const signedIn = state.status === "signed-in"
+  // One live connection for the whole signed-in session (this layout stays mounted).
+  useRealtime(signedIn)
 
   React.useEffect(() => {
     if (signedIn) clearReturnTo()
@@ -57,6 +62,8 @@ export function App() {
           <Route path="groups/:groupId/events/:eventId" element={<EventPage />} />
           <Route path="invite/:code" element={<InvitePage />} />
           <Route path="settings/payments" element={<PaymentSettingsPage />} />
+          <Route path="settings/notifications" element={<NotificationSettingsPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
         </Route>
         <Route element={<GuestOnly />}>
           <Route path="login" element={<LoginPage />} />

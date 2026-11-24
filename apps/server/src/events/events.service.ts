@@ -25,6 +25,7 @@ import { lockActiveMembers, lockGroup } from '../expenses/ledger.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { GroupAccessService } from '../groups/group-access.service.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
+import { OutboxService } from '../notifications/outbox.service.js';
 import { personSelect } from '../expenses/expense-mappers.js';
 import {
   canEditEvent,
@@ -50,6 +51,7 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: GroupAccessService,
+    private readonly outbox: OutboxService,
   ) {}
 
   /**
@@ -151,8 +153,10 @@ export class EventsService {
       await this.log(tx, event.groupId, userId, 'event.created', event.id, {
         after: eventSnapshot(event),
       });
+      await this.notify(tx, 'event.created', userId, event);
       return event.id;
     });
+    this.outbox.kick();
     return this.get(id, userId);
   }
 
@@ -180,7 +184,14 @@ export class EventsService {
         before: eventSnapshot(event),
         after: eventSnapshot(after),
       });
+      // Only changes people need to act on: when and where. A reworded title isn't news.
+      const moved =
+        after.startsAt.getTime() !== event.startsAt.getTime() ||
+        after.endsAt?.getTime() !== event.endsAt?.getTime() ||
+        after.location !== event.location;
+      if (moved) await this.notify(tx, 'event.updated', userId, after);
     });
+    this.outbox.kick();
     return this.get(eventId, userId);
   }
 
@@ -198,7 +209,9 @@ export class EventsService {
       await this.log(tx, event.groupId, userId, 'event.cancelled', eventId, {
         before: eventSnapshot(event),
       });
+      await this.notify(tx, 'event.cancelled', userId, event);
     });
+    this.outbox.kick();
     return this.get(eventId, userId);
   }
 
@@ -261,8 +274,18 @@ export class EventsService {
         data: { eventId, authorId: userId, body: input.body },
         include: { author: { select: personSelect } },
       });
+      // The planner and anyone going or maybe; not everyone in the group.
+      const attending = await tx.eventRsvp.findMany({
+        where: { eventId, status: { in: ['going', 'maybe'] } },
+        select: { userId: true },
+      });
+      await this.notify(tx, 'event.commented', userId, event, {
+        userIds: [event.createdBy, ...attending.map((r) => r.userId)],
+        excerpt: input.body.length > 80 ? `${input.body.slice(0, 79)}…` : input.body,
+      });
       return { created, role };
     });
+    this.outbox.kick();
     return this.toComment(comment.created, userId, comment.role);
   }
 
@@ -371,6 +394,29 @@ export class EventsService {
       createdAt: comment.createdAt.toISOString(),
       canDelete: comment.authorId === userId || roleAtLeast(role, 'admin'),
     };
+  }
+
+  private async notify(
+    tx: Tx,
+    type: 'event.created' | 'event.updated' | 'event.cancelled' | 'event.commented',
+    actorId: string,
+    event: { id: string; groupId: string; title: string; startsAt: Date },
+    only?: { userIds: string[]; excerpt: string },
+  ): Promise<void> {
+    await this.outbox.add(tx, {
+      type,
+      groupId: event.groupId,
+      actorId,
+      audience: only ? { kind: 'users', userIds: [...new Set(only.userIds)] } : { kind: 'group' },
+      data: {
+        groupId: event.groupId,
+        ...(await this.outbox.names(tx, event.groupId, actorId)),
+        eventId: event.id,
+        title: event.title,
+        startsAt: event.startsAt.toISOString(),
+        ...(only && { excerpt: only.excerpt }),
+      },
+    });
   }
 
   private async log(

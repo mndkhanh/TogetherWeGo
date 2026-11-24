@@ -8,6 +8,7 @@ const AUDIENCE = 'togetherwego-web';
 
 interface AccessTokenClaims {
   sub: string;
+  exp?: number;
 }
 
 /** Short-lived (15 min by default) JWT access tokens, sent as `Authorization: Bearer`. */
@@ -35,12 +36,17 @@ export class AccessTokenService {
 
   /** Returns the user id, or throws if the token is invalid or expired. */
   async verify(token: string): Promise<string> {
+    return (await this.verifyWithExpiry(token)).userId;
+  }
+
+  /** Also says when the token runs out, for long-lived connections (WebSockets). */
+  async verifyWithExpiry(token: string): Promise<{ userId: string; expiresAt: Date }> {
     const claims = await this.jwt.verifyAsync<AccessTokenClaims>(token, {
       issuer: ISSUER,
       audience: AUDIENCE,
       algorithms: ['HS256'],
       secret: this.config.jwt.accessSecret,
     });
-    return claims.sub;
+    return { userId: claims.sub, expiresAt: new Date((claims.exp ?? 0) * 1000) };
   }
 }

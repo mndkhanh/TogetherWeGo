@@ -1,4 +1,5 @@
-// Identity (phase 0), groups (phase 1), expenses (phase 2), settling up (phase 3), events (phase 4).
+// Identity (phase 0), groups (phase 1), expenses (phase 2), settling up (phase 3), events (phase 4),
+// notifications (phase 5).
 
 generator client {
   provider            = "prisma-client"
@@ -29,21 +30,24 @@ model User {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  refreshTokens   RefreshToken[]
-  memberships     GroupMember[]
-  createdGroups   Group[]            @relation("GroupCreator")
-  createdInvites  GroupInvite[]
-  paidExpenses    Expense[]          @relation("ExpensePayer")
-  createdExpenses Expense[]          @relation("ExpenseCreator")
-  expenseSplits   ExpenseSplit[]
-  activity        ActivityLog[]
-  paymentAccount  PaymentAccount?
-  paymentsSent    Settlement[]       @relation("SettlementFrom")
-  paymentsGot     Settlement[]       @relation("SettlementTo")
-  transfersIn     SepayTransaction[]
-  createdEvents   Event[]
-  rsvps           EventRsvp[]
-  comments        EventComment[]
+  refreshTokens     RefreshToken[]
+  memberships       GroupMember[]
+  createdGroups     Group[]                  @relation("GroupCreator")
+  createdInvites    GroupInvite[]
+  paidExpenses      Expense[]                @relation("ExpensePayer")
+  createdExpenses   Expense[]                @relation("ExpenseCreator")
+  expenseSplits     ExpenseSplit[]
+  activity          ActivityLog[]
+  paymentAccount    PaymentAccount?
+  paymentsSent      Settlement[]             @relation("SettlementFrom")
+  paymentsGot       Settlement[]             @relation("SettlementTo")
+  transfersIn       SepayTransaction[]
+  createdEvents     Event[]
+  rsvps             EventRsvp[]
+  comments          EventComment[]
+  notifications     Notification[]
+  notificationPrefs NotificationPreference[]
+  emailDeliveries   EmailDelivery[]
 
   @@map("users")
 }
@@ -377,4 +381,76 @@ model EventComment {
 
   @@index([eventId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("event_comments")
+}
+
+/// Transactional outbox: written in the same transaction as the change it describes, so a
+/// notification is never lost and never sent for a change that rolled back. The worker fans
+/// each row out once (processed_at), safe to retry.
+model Outbox {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  type        String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(3)
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error")
+
+  @@index([createdAt], map: "outbox_unprocessed_idx")
+  @@map("outbox")
+}
+
+/// One person's in-app notification. `data` keeps names and titles as they were, so the feed
+/// reads the same later. Unique per (outbox row, user): a retried fan-out adds nothing.
+model Notification {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  type      String
+  actorId   String?   @map("actor_id") @db.Uuid
+  data      Json
+  outboxId  String    @map("outbox_id") @db.Uuid
+  readAt    DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([outboxId, userId])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("notifications")
+}
+
+/// Only changes from the defaults (NOTIFICATION_DEFAULTS in @twg/shared) are stored.
+model NotificationPreference {
+  userId String  @map("user_id") @db.Uuid
+  type   String
+  inApp  Boolean @map("in_app")
+  email  Boolean
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
+  @@map("notification_preferences")
+}
+
+/// Each email the fan-out decided to send, written in the same transaction as the in-app
+/// notifications. Jobs are queued only after that commits, and sent_at stops a retried job from
+/// sending twice. (A crash between the provider accepting it and sent_at being written can still
+/// repeat one: email is at-least-once.)
+model EmailDelivery {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  outboxId  String    @map("outbox_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  toAddress String    @map("to_address")
+  subject   String
+  text      String
+  html      String
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  sentAt    DateTime? @map("sent_at") @db.Timestamptz(3)
+  attempts  Int       @default(0)
+  lastError String?   @map("last_error")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([outboxId, userId])
+  @@index([sentAt, createdAt])
+  @@map("email_deliveries")
 }

@@ -20,6 +20,7 @@ import { lockActiveMembers, lockGroup, lockMemberships } from '../expenses/ledge
 import { Prisma } from '../generated/prisma/client.js';
 import { GroupAccessService } from '../groups/group-access.service.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
+import { OutboxService } from '../notifications/outbox.service.js';
 import {
   newPaymentCode,
   settlementInclude,
@@ -45,6 +46,7 @@ export class SettlementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: GroupAccessService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async list(groupId: string, userId: string): Promise<SettlementResponse[]> {
@@ -161,9 +163,15 @@ export class SettlementsService {
               via: 'manual',
               paidAmount: input.amount,
             });
+            await this.notify(tx, 'settlement.confirmed', settlement.id, settlement.fromUserId, {
+              via: 'manual',
+            });
+          } else {
+            await this.notify(tx, 'settlement.requested', settlement.id, settlement.toUserId);
           }
           return settlement.id;
         });
+        this.outbox.kick();
         return this.get(id, userId);
       } catch (error) {
         // Payment codes are random; on the rare clash, try again with a new one.
@@ -212,7 +220,11 @@ export class SettlementsService {
         via: 'manual',
         paidAmount: paid,
       });
+      await this.notify(tx, 'settlement.confirmed', settlementId, settlement.fromUserId, {
+        via: 'manual',
+      });
     });
+    this.outbox.kick();
     return this.get(settlementId, userId);
   }
 
@@ -230,7 +242,10 @@ export class SettlementsService {
         data: { status: 'cancelled', cancelledAt: new Date() },
       });
       await this.log(tx, settlement, userId, 'settlement.cancelled', {});
+      const other = userId === settlement.fromUserId ? settlement.toUserId : settlement.fromUserId;
+      await this.notify(tx, 'settlement.cancelled', settlementId, other, {}, userId);
     });
+    this.outbox.kick();
     return this.get(settlementId, userId);
   }
 
@@ -310,6 +325,7 @@ export class SettlementsService {
       await this.confirmWithTransfer(tx, settlement, transfer, userId);
       return settlement.id;
     });
+    this.outbox.kick();
     return this.get(settlementId, userId);
   }
 
@@ -353,6 +369,41 @@ export class SettlementsService {
       via: 'sepay',
       paidAmount: Number(transfer.amount),
       transferId: transfer.id,
+    });
+    const { fromUserId } = await tx.settlement.findUniqueOrThrow({
+      where: { id: settlement.id },
+      select: { fromUserId: true },
+    });
+    await this.notify(tx, 'settlement.confirmed', settlement.id, fromUserId, { via: 'sepay' });
+  }
+
+  /**
+   * Tells one of the two people in a payment. The actor defaults to the payee for
+   * confirmations and the payer for requests, matching how the sentence reads.
+   */
+  private async notify(
+    tx: Tx,
+    type: 'settlement.requested' | 'settlement.confirmed' | 'settlement.cancelled',
+    settlementId: string,
+    recipientId: string,
+    extra: { via?: 'sepay' | 'manual' } = {},
+    actorId?: string,
+  ): Promise<void> {
+    const s = await tx.settlement.findUniqueOrThrow({ where: { id: settlementId } });
+    const actor = actorId ?? (type === 'settlement.requested' ? s.fromUserId : s.toUserId);
+    await this.outbox.add(tx, {
+      type,
+      groupId: s.groupId,
+      actorId: actor,
+      audience: { kind: 'users', userIds: [recipientId] },
+      data: {
+        groupId: s.groupId,
+        ...(await this.outbox.names(tx, s.groupId, actor)),
+        settlementId: s.id,
+        amount: Number(s.paidAmount ?? s.amount),
+        currency: s.currency,
+        ...extra,
+      },
     });
   }
 

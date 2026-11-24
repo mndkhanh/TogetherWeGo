@@ -4,8 +4,11 @@ import { APP_CONFIG, AppConfigModule } from './infra/config/app-config.module.js
 import type { AppConfig } from './infra/config/env.schema.js';
 import { LoggerModule } from './infra/logger/logger.module.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
+import { RedisModule } from './infra/redis/redis.module.js';
+import { EmailProcessor, NotificationsProcessor } from './jobs/notifications.processor.js';
 import { bullRootOptions, QUEUES } from './jobs/queues.js';
 import { SystemProcessor } from './jobs/system.processor.js';
+import { NotificationsCoreModule } from './notifications/notifications.module.js';
 
 /** Root module of the background worker process (no HTTP server). */
 @Module({
@@ -13,12 +16,14 @@ import { SystemProcessor } from './jobs/system.processor.js';
     AppConfigModule,
     LoggerModule,
     PrismaModule,
+    RedisModule,
     BullModule.forRootAsync({
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => bullRootOptions(config),
     }),
-    BullModule.registerQueue({ name: QUEUES.system }),
+    BullModule.registerQueue({ name: QUEUES.system }, { name: QUEUES.notifications }),
+    NotificationsCoreModule,
   ],
-  providers: [SystemProcessor],
+  providers: [SystemProcessor, NotificationsProcessor, EmailProcessor],
 })
 export class WorkerModule {}

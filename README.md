@@ -23,8 +23,10 @@ pnpm db:up                                      # Postgres :5432, Valkey :6380, 
 pnpm --filter @twg/shared build
 pnpm db:migrate
 pnpm dev                                        # API on :3100, web on http://localhost:5173
-pnpm dev:worker                                 # background worker (separate terminal)
+pnpm dev:worker                                 # background worker: notifications and email (separate terminal)
 ```
+
+Emails are caught by Mailpit locally: open http://localhost:8025.
 
 The web app calls the API on the same origin (`/v1/*`): Vite proxies it locally and CloudFront routes it in AWS,
 so there is no CORS and the refresh-token cookie stays first-party.
@@ -94,5 +96,13 @@ aws ssm start-session --target <instance-id>            # shell on an ECS instan
 - Event titles, descriptions, locations and comments are plain text: React escapes them and nothing is ever
   rendered as HTML. The map link is built from the location as an encoded query parameter, never a URL the
   user typed. Comments are rate-limited (20 a minute).
+- Notifications use a transactional outbox: written in the same transaction as the change, so nothing is
+  sent for a change that rolled back and nothing is lost if Redis or the worker is down. Fan-out is idempotent.
+  People who have left a group never receive its notifications.
+- The realtime WebSocket checks the Origin header and the CloudFront secret itself (it sits outside Nest's
+  middleware), takes the access token in the handshake body (never a cookie or the URL), and hangs up when the
+  token expires. Each socket can only join its own user's room.
+- Emails escape everything users typed, and subjects are stripped of line breaks (no header injection). Only the
+  worker can send email: it has its own IAM role limited to `ses:SendEmail` from one sender address.
 - Access tokens live in memory only; refresh tokens are httpOnly, `SameSite=Lax`, scoped to `/v1/auth`,
   rotated on every use, with reuse detection that revokes the whole session family.

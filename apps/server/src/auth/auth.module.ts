@@ -21,5 +21,7 @@ import { RefreshTokenService } from './refresh-token.service.js';
     GoogleOAuthService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
+  // The realtime gateway checks the same access tokens on WebSocket connections.
+  exports: [AccessTokenService],
 })
 export class AuthModule {}

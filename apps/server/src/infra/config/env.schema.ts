@@ -46,6 +46,11 @@ export const envSchema = z
     RECEIPTS_BUCKET: optionalString,
     /** Only for local S3-compatible emulators; leave unset on AWS. */
     S3_ENDPOINT: optionalString,
+
+    /** Sender of notification emails. On AWS it must be an SES-verified identity. */
+    MAIL_FROM: z.string().default('TogetherWeGo <no-reply@togetherwego.local>'),
+    /** Local SMTP catcher (Mailpit), e.g. smtp://localhost:1025. Unset: send with SES. */
+    SMTP_URL: optionalString,
   })
   .transform((env, ctx) => {
     let databaseUrl = env.DATABASE_URL;
@@ -103,6 +108,7 @@ export const envSchema = z
               redirectUri: env.GOOGLE_REDIRECT_URI ?? `${appOrigin}/v1/auth/google/callback`,
             }
           : undefined,
+      mail: { from: env.MAIL_FROM, smtpUrl: env.SMTP_URL, region: env.AWS_REGION },
       receipts: env.RECEIPTS_BUCKET
         ? { bucket: env.RECEIPTS_BUCKET, region: env.AWS_REGION, endpoint: env.S3_ENDPOINT }
         : undefined,

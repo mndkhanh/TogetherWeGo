@@ -1,3 +1,4 @@
+import { BullModule } from '@nestjs/bullmq';
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -10,6 +11,8 @@ import { HealthController } from './health/health.controller.js';
 import { APP_CONFIG, AppConfigModule } from './infra/config/app-config.module.js';
 import type { AppConfig } from './infra/config/env.schema.js';
 import { LoggerModule } from './infra/logger/logger.module.js';
+import { bullRootOptions } from './jobs/queues.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { RedisModule } from './infra/redis/redis.module.js';
@@ -22,6 +25,12 @@ import { UsersModule } from './users/users.module.js';
     LoggerModule,
     PrismaModule,
     RedisModule,
+    // The API only adds jobs (outbox kicks); the worker process runs them.
+    BullModule.forRootAsync({
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => bullRootOptions(config),
+    }),
+    NotificationsModule,
     // Default: 120 requests/minute per IP. In-memory per task for now; Redis storage later.
     // Disabled only under NODE_ENV=test, where e2e suites create many users from one IP.
     ThrottlerModule.forRootAsync({

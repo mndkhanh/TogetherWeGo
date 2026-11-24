@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import type { MeResponse } from "@twg/shared"
-import { BanknoteIcon, LogOutIcon } from "lucide-react"
+import { BanknoteIcon, BellIcon, LogOutIcon } from "lucide-react"
 import * as React from "react"
 import { useNavigate } from "react-router"
 
@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { NotificationBell } from "@/components/notifications/notification-bell"
 import { Wordmark } from "@/components/wordmark"
 import { api } from "@/lib/api"
 import { meQueryKey, useAuth } from "@/lib/auth"
@@ -59,6 +60,10 @@ function AccountMenu({ user }: { user: MeResponse }) {
             <BanknoteIcon />
             Getting paid
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void navigate("/settings/notifications")}>
+            <BellIcon />
+            Notification settings
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
@@ -79,7 +84,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="border-b bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
           <Wordmark />
-          <AccountMenu user={user} />
+          <div className="flex items-center gap-1">
+            <NotificationBell />
+            <AccountMenu user={user} />
+          </div>
         </div>
       </header>
       <main className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-10">{children}</main>

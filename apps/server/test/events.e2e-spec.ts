@@ -289,7 +289,7 @@ describe('Events (e2e)', () => {
     // The database refuses a cross-group link even if the service were bypassed.
     await expect(
       prisma.expense.update({ where: { id: linked.body.id }, data: { eventId: foreign.id } }),
-    ).rejects.toThrow(/expenses_event_same_group_fkey/);
+    ).rejects.toThrow(/can only link to an event in its own group/);
   });
 
   it('archived groups are read-only for events', async () => {

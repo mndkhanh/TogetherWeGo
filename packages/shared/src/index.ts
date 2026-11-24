@@ -6,4 +6,5 @@ export * from './schemas/auth.js';
 export * from './schemas/events.js';
 export * from './schemas/expenses.js';
 export * from './schemas/groups.js';
+export * from './schemas/notifications.js';
 export * from './schemas/payments.js';

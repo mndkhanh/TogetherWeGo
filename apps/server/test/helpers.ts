@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, Type } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -11,9 +11,14 @@ import { PrismaService } from '../src/infra/prisma/prisma.service.js';
 export const ORIGIN = 'http://localhost:5173';
 export const PASSWORD = 'correct-horse-battery';
 
-/** Boots the real API module with the production HTTP setup. */
-export async function createTestApp(): Promise<{ app: INestApplication; prisma: PrismaService }> {
-  const moduleRef = await Test.createTestingModule({ imports: [ApiModule] }).compile();
+/**
+ * Boots the real API module with the production HTTP setup. `extra` adds worker-side modules
+ * (e.g. the notification fan-out) so tests can run background work on demand.
+ */
+export async function createTestApp(
+  extra: Type[] = [],
+): Promise<{ app: INestApplication; prisma: PrismaService }> {
+  const moduleRef = await Test.createTestingModule({ imports: [ApiModule, ...extra] }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app, app.get(APP_CONFIG));
   await app.init();

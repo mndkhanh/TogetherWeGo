@@ -7,6 +7,7 @@ import {
   MAX_GROUP_MEMBERS,
 } from '@twg/shared';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
+import { OutboxService } from '../notifications/outbox.service.js';
 import { GroupAccessService } from './group-access.service.js';
 import { toInviteResponse } from './group-mappers.js';
 
@@ -30,6 +31,7 @@ export class InvitesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: GroupAccessService,
+    private readonly outbox: OutboxService,
   ) {}
 
   async create(groupId: string, userId: string, input: CreateInviteInput): Promise<InviteResponse> {
@@ -116,7 +118,8 @@ export class InvitesService {
    * and the use counter is incremented with a guarded UPDATE so it can't exceed maxUses.
    */
   async accept(code: string, userId: string): Promise<{ groupId: string }> {
-    return this.prisma.$transaction(async (tx) => {
+    let joined = false;
+    const result = await this.prisma.$transaction(async (tx) => {
       const invite = await tx.groupInvite.findUnique({ where: { code } });
       if (!invite) {
         throw new NotFoundException(INVALID_INVITE);
@@ -165,8 +168,18 @@ export class InvitesService {
         create: { groupId: invite.groupId, userId, role: 'member' },
         update: { leftAt: null, role: 'member', joinedAt: new Date() },
       });
+      await this.outbox.add(tx, {
+        type: 'group.member_joined',
+        groupId: invite.groupId,
+        actorId: userId,
+        audience: { kind: 'group' },
+        data: { groupId: invite.groupId, ...(await this.outbox.names(tx, invite.groupId, userId)) },
+      });
+      joined = true;
       return { groupId: invite.groupId };
     });
+    if (joined) this.outbox.kick();
+    return result;
   }
 }
 
