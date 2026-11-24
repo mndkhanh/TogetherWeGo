@@ -57,7 +57,10 @@ import {
   useCreateExpense,
   useUpdateExpense,
 } from "@/lib/expenses"
+import { formatEventTime, useEvents } from "@/lib/events"
 import { type FieldErrors, formErrorMessage, toFieldErrors, validate } from "@/lib/form-errors"
+
+const NO_EVENT = "none"
 
 const SPLIT_LABEL: Record<SplitType, string> = {
   equal: "Equally",
@@ -79,12 +82,14 @@ interface FormState {
   note: string
   receiptKey: string | null
   receiptPreview: string | null
+  eventId: string | null
 }
 
 function initialState(
   group: GroupDetailResponse,
   myUserId: string,
-  expense?: ExpenseDetailResponse
+  expense?: ExpenseDetailResponse,
+  eventId: string | null = null
 ): FormState {
   const entries: Entries = {}
   for (const member of group.members) {
@@ -115,6 +120,7 @@ function initialState(
     note: expense?.note ?? "",
     receiptKey: expense?.hasReceipt ? "existing" : null,
     receiptPreview: expense?.receiptUrl ?? null,
+    eventId: expense ? (expense.event?.id ?? null) : eventId,
   }
 }
 
@@ -177,6 +183,7 @@ export function ExpenseFormDialog({
   group,
   myUserId,
   expense,
+  eventId = null,
   open,
   onOpenChange,
 }: {
@@ -184,11 +191,15 @@ export function ExpenseFormDialog({
   myUserId: string
   /** Given when editing. */
   expense?: ExpenseDetailResponse
+  /** For a new expense started from an event's page. */
+  eventId?: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const currency = group.currency
-  const [state, setState] = React.useState(() => initialState(group, myUserId, expense))
+  const [state, setState] = React.useState(() => initialState(group, myUserId, expense, eventId))
+  const upcoming = useEvents(group.id, "upcoming", open)
+  const recent = useEvents(group.id, "past", open)
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [formError, setFormError] = React.useState<string | null>(null)
   const [uploading, setUploading] = React.useState(false)
@@ -197,9 +208,20 @@ export function ExpenseFormDialog({
   const pending = create.isPending || update.isPending
   const fileInput = React.useRef<HTMLInputElement>(null)
 
+  // Upcoming and recent events, plus the linked one even if it's older than that.
+  const eventOptions = React.useMemo(() => {
+    const seen = new Map<string, { value: string; label: string }>()
+    const add = (e: { id: string; title: string; startsAt: string }) =>
+      seen.set(e.id, { value: e.id, label: `${e.title} · ${formatEventTime(e.startsAt, null)}` })
+    for (const page of upcoming.data?.pages ?? []) page.items.forEach(add)
+    for (const page of recent.data?.pages ?? []) page.items.forEach(add)
+    if (expense?.event) add(expense.event)
+    return [...seen.values()]
+  }, [upcoming.data, recent.data, expense?.event])
+
   React.useEffect(() => {
     if (open) {
-      setState(initialState(group, myUserId, expense))
+      setState(initialState(group, myUserId, expense, eventId))
       setFieldErrors({})
       setFormError(null)
     }
@@ -217,6 +239,7 @@ export function ExpenseFormDialog({
     entries: "splits",
     note: "note",
     receiptKey: "receiptKey",
+    eventId: "eventId",
   }
   const clearError = (key: keyof FormState) => {
     const field = FIELD_FOR[key]
@@ -292,6 +315,7 @@ export function ExpenseFormDialog({
       spentOn: state.spentOn,
       note: state.note.trim() === "" ? null : state.note,
       receiptKey,
+      eventId: state.eventId,
     }
     const { data, errors: schemaErrors } = validate(createExpenseSchema(currency), candidate)
     const merged = { ...schemaErrors, ...errors }
@@ -489,6 +513,34 @@ export function ExpenseFormDialog({
               {hint && !fieldErrors.splits && <FieldDescription>{hint}</FieldDescription>}
               <FieldError>{fieldErrors.splits}</FieldError>
             </FieldSet>
+
+            {eventOptions.length > 0 && (
+              <Field data-invalid={!!fieldErrors.eventId || undefined}>
+                <FieldLabel htmlFor="expense-event">Event (optional)</FieldLabel>
+                <Select
+                  items={[{ value: NO_EVENT, label: "Not for an event" }, ...eventOptions]}
+                  value={state.eventId ?? NO_EVENT}
+                  onValueChange={(value) =>
+                    set("eventId", value === NO_EVENT || !value ? null : (value as string))
+                  }
+                >
+                  <SelectTrigger id="expense-event" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={NO_EVENT}>Not for an event</SelectItem>
+                      {eventOptions.map((e) => (
+                        <SelectItem key={e.value} value={e.value}>
+                          {e.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FieldError>{fieldErrors.eventId}</FieldError>
+              </Field>
+            )}
 
             <Field data-invalid={!!fieldErrors.note || undefined}>
               <FieldLabel htmlFor="expense-note">Note (optional)</FieldLabel>

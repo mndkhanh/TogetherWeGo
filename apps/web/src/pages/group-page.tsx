@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowLeftIcon,
+  CalendarPlusIcon,
   EllipsisIcon,
   LogOutIcon,
   PencilIcon,
@@ -15,6 +16,8 @@ import { toast } from "sonner"
 
 import { AppShell, useMe } from "@/components/app-shell"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
+import { EventFormDialog } from "@/components/events/event-form-dialog"
+import { EventList } from "@/components/events/event-list"
 import { BalancesPanel } from "@/components/expenses/balances-panel"
 import { ExpenseDetailDialog } from "@/components/expenses/expense-detail-dialog"
 import { ExpenseFormDialog } from "@/components/expenses/expense-form-dialog"
@@ -95,6 +98,7 @@ export function GroupPage() {
   const [editing, setEditing] = React.useState(false)
   const [confirm, setConfirm] = React.useState<ConfirmRequest | null>(null)
   const [addingExpense, setAddingExpense] = React.useState(false)
+  const [planning, setPlanning] = React.useState(false)
   const [editingExpense, setEditingExpense] = React.useState<ExpenseDetailResponse | null>(null)
   const [openExpenseId, setOpenExpenseId] = React.useState<string | null>(null)
   const [paymentDraft, setPaymentDraft] = React.useState<PaymentDraft | null>(null)
@@ -263,6 +267,7 @@ export function GroupPage() {
       >
         <TabsList>
           <TabsTrigger value="expenses">Expenses</TabsTrigger>
+          <TabsTrigger value="events">Events</TabsTrigger>
           <TabsTrigger value="balances">Balances</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
         </TabsList>
@@ -280,6 +285,15 @@ export function GroupPage() {
               )
             }
           />
+        </TabsContent>
+        <TabsContent value="events" className="flex flex-col gap-4">
+          {!archived && (
+            <Button variant="outline" className="self-start" onClick={() => setPlanning(true)}>
+              <CalendarPlusIcon data-icon="inline-start" />
+              Plan an event
+            </Button>
+          )}
+          <EventList groupId={data.id} />
         </TabsContent>
         <TabsContent value="balances">
           <BalancesPanel
@@ -339,6 +353,7 @@ export function GroupPage() {
           setOpenPaymentId(null)
         }}
       />
+      <EventFormDialog groupId={data.id} open={planning} onOpenChange={setPlanning} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </AppShell>
   )

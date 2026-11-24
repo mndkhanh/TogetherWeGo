@@ -91,5 +91,8 @@ aws ssm start-session --target <instance-id>            # shell on an ECS instan
   is stored, and a key can only confirm payments to its own owner, so a forged webhook from one user's SePay
   can't settle someone else's debt. Retries are idempotent (unique SePay id per payee).
 - Bank account numbers are shown only to the two people in a pending payment.
+- Event titles, descriptions, locations and comments are plain text: React escapes them and nothing is ever
+  rendered as HTML. The map link is built from the location as an encoded query parameter, never a URL the
+  user typed. Comments are rate-limited (20 a minute).
 - Access tokens live in memory only; refresh tokens are httpOnly, `SameSite=Lax`, scoped to `/v1/auth`,
   rotated on every use, with reuse detection that revokes the whole session family.

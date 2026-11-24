@@ -62,6 +62,7 @@ export class ExpensesService {
       where: {
         groupId,
         deletedAt: null,
+        ...(query.eventId && { eventId: query.eventId }),
         ...(cursor && {
           OR: [
             { spentOn: { lt: cursor.spentOn } },
@@ -100,6 +101,7 @@ export class ExpensesService {
     const input = parseOrThrow(createExpenseSchema(group.currency), body);
     const splits = this.splitsFor(input);
     if (input.receiptKey) await this.receipts.assertAttachable(groupId, input.receiptKey);
+    await this.assertEventInGroup(groupId, input.eventId);
 
     const expenseId = await this.prisma.$transaction(async (tx) => {
       await this.requireActive(tx, groupId, group.currency, [userId, ...peopleIn(input)]);
@@ -114,6 +116,7 @@ export class ExpensesService {
           splitType: input.splitType,
           spentOn: toDateOnly(input.spentOn),
           receiptKey: input.receiptKey,
+          eventId: input.eventId,
           createdBy: userId,
           splits: { create: splits },
         },
@@ -136,6 +139,7 @@ export class ExpensesService {
     if (input.receiptKey && input.receiptKey !== expense.receiptKey) {
       await this.receipts.assertAttachable(expense.groupId, input.receiptKey);
     }
+    await this.assertEventInGroup(expense.groupId, input.eventId);
 
     await this.prisma.$transaction(async (tx) => {
       // Everyone affected, before and after, must still be in the group: people who left
@@ -159,6 +163,7 @@ export class ExpensesService {
           splitType: input.splitType,
           spentOn: toDateOnly(input.spentOn),
           receiptKey: input.receiptKey,
+          eventId: input.eventId,
           version: { increment: 1 },
         },
       });
@@ -278,6 +283,18 @@ export class ExpensesService {
     }
   }
 
+  /** A friendly 400 before the composite foreign key would reject it anyway. */
+  private async assertEventInGroup(groupId: string, eventId: string | null): Promise<void> {
+    if (!eventId) return;
+    const event = await this.prisma.event.findFirst({ where: { id: eventId, groupId } });
+    if (!event) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        issues: [{ path: 'eventId', message: 'Choose an event in this group' }],
+      });
+    }
+  }
+
   private splitsFor(input: CreateExpenseInput) {
     const result = computeSplits(input.amount, input.splitType, input.splits);
     if (!result.ok) throw new BadRequestException(result.error); // already checked by the schema
@@ -393,7 +410,10 @@ function encodeCursor(expense: { spentOn: Date; id: string }): string {
 
 function decodeCursor(cursor: string): { spentOn: Date; id: string } {
   const text = Buffer.from(cursor, 'base64url').toString();
-  const match = /^(\d{4}-\d{2}-\d{2})_([0-9a-f-]{36})$/.exec(text);
+  const match =
+    /^(\d{4}-\d{2}-\d{2})_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(
+      text,
+    );
   if (!match) throw new BadRequestException('Invalid cursor');
   return { spentOn: toDateOnly(match[1]!), id: match[2]! };
 }

@@ -31,12 +31,22 @@ export function PersonAvatar({
 }
 
 /** Overlapping avatars for the first few members, then "+N". */
-export function MemberAvatars({ people, total }: { people: Person[]; total: number }) {
+export function MemberAvatars({
+  people,
+  total,
+  label = `${total} members`,
+  size,
+}: {
+  people: Person[]
+  total: number
+  label?: string
+  size?: "default" | "sm"
+}) {
   const shown = people.slice(0, 4)
   return (
-    <AvatarGroup aria-label={`${total} members`}>
+    <AvatarGroup aria-label={label}>
       {shown.map((person) => (
-        <PersonAvatar key={person.userId} person={person} />
+        <PersonAvatar key={person.userId} person={person} size={size} />
       ))}
       {total > shown.length && <AvatarGroupCount>+{total - shown.length}</AvatarGroupCount>}
     </AvatarGroup>

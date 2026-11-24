@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module.js';
 import { OriginVerifyMiddleware } from './common/origin-verify.middleware.js';
+import { EventsModule } from './events/events.module.js';
 import { ExpensesModule } from './expenses/expenses.module.js';
 import { GroupsModule } from './groups/groups.module.js';
 import { HealthController } from './health/health.controller.js';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module.js';
     GroupsModule,
     ExpensesModule,
     PaymentsModule,
+    EventsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -1,4 +1,4 @@
-// Identity (phase 0), groups (phase 1), expenses (phase 2) and settling up (phase 3).
+// Identity (phase 0), groups (phase 1), expenses (phase 2), settling up (phase 3), events (phase 4).
 
 generator client {
   provider            = "prisma-client"
@@ -41,6 +41,9 @@ model User {
   paymentsSent    Settlement[]       @relation("SettlementFrom")
   paymentsGot     Settlement[]       @relation("SettlementTo")
   transfersIn     SepayTransaction[]
+  createdEvents   Event[]
+  rsvps           EventRsvp[]
+  comments        EventComment[]
 
   @@map("users")
 }
@@ -87,6 +90,7 @@ model Group {
   invites     GroupInvite[]
   expenses    Expense[]
   settlements Settlement[]
+  events      Event[]
   activity    ActivityLog[]
 
   @@map("groups")
@@ -149,6 +153,8 @@ model Expense {
   /// The calendar day it was spent (no time zone).
   spentOn    DateTime  @map("spent_on") @db.Date
   receiptKey String?   @map("receipt_key")
+  /// The group event it was for. A composite FK in the migration keeps it in the same group.
+  eventId    String?   @map("event_id") @db.Uuid
   createdBy  String    @map("created_by") @db.Uuid
   deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
   version    Int       @default(1)
@@ -158,9 +164,11 @@ model Expense {
   group   Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   payer   User           @relation("ExpensePayer", fields: [payerId], references: [id])
   creator User           @relation("ExpenseCreator", fields: [createdBy], references: [id])
+  event   Event?         @relation(fields: [eventId], references: [id])
   splits  ExpenseSplit[]
 
   @@index([groupId, spentOn(sort: Desc), id(sort: Desc)])
+  @@index([eventId])
   @@map("expenses")
 }
 
@@ -298,4 +306,75 @@ model SepayTransaction {
   @@unique([userId, sepayId])
   @@index([userId, status, receivedAt(sort: Desc)])
   @@map("sepay_transactions")
+}
+
+enum EventStatus {
+  scheduled
+  cancelled
+}
+
+/// A hangout in a group. Never deleted: cancelling keeps it, with its comments and expenses.
+model Event {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  groupId     String      @map("group_id") @db.Uuid
+  title       String
+  description String?
+  location    String?
+  startsAt    DateTime    @map("starts_at") @db.Timestamptz(3)
+  endsAt      DateTime?   @map("ends_at") @db.Timestamptz(3)
+  status      EventStatus @default(scheduled)
+  createdBy   String      @map("created_by") @db.Uuid
+  cancelledAt DateTime?   @map("cancelled_at") @db.Timestamptz(3)
+  version     Int         @default(1)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator  User           @relation(fields: [createdBy], references: [id])
+  rsvps    EventRsvp[]
+  comments EventComment[]
+  expenses Expense[]
+
+  /// Target of the (event_id, group_id) foreign key from expenses.
+  @@unique([id, groupId])
+  @@index([groupId, startsAt])
+  @@map("events")
+}
+
+enum RsvpStatus {
+  going
+  maybe
+  no
+}
+
+model EventRsvp {
+  eventId   String     @map("event_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  status    RsvpStatus
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, userId])
+  @@index([userId])
+  @@map("event_rsvps")
+}
+
+/// Plain text only: shown escaped, never as HTML. Deleting is soft, so threads keep their shape
+/// in the audit trail.
+model EventComment {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  eventId   String    @map("event_id") @db.Uuid
+  authorId  String    @map("author_id") @db.Uuid
+  body      String
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy String?   @map("deleted_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  event  Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("event_comments")
 }

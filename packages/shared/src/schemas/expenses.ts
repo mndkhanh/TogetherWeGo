@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { type Currency, MAX_AMOUNT } from '../money/money.js';
 import { computeSplits, SPLIT_TYPES, type SplitType } from '../money/splits.js';
+import type { EventRef } from './events.js';
 import { MAX_GROUP_MEMBERS } from './groups.js';
 
 /** Receipt photos: what the browser may upload, and how big. */
@@ -40,6 +41,8 @@ const expenseFields = z.object({
   note: z.string().trim().max(500, 'Use 500 characters or fewer').nullable().default(null),
   /** Key returned by the receipt upload endpoint, or null for no receipt. */
   receiptKey: z.string().max(200).nullable().default(null),
+  /** The group event it was for, if any. */
+  eventId: z.uuid().nullable().default(null),
 });
 
 function checkAmountAndSplits(
@@ -86,6 +89,8 @@ export const receiptUploadSchema = z.object({
 export type ReceiptUploadInput = z.infer<typeof receiptUploadSchema>;
 
 export const listExpensesQuerySchema = z.object({
+  /** Only the expenses linked to this event. */
+  eventId: z.uuid().optional(),
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
@@ -117,6 +122,8 @@ export interface ExpenseResponse {
   spentOn: string;
   note: string | null;
   hasReceipt: boolean;
+  /** The event it was for, if any. */
+  event: EventRef | null;
   createdBy: PersonRef;
   createdAt: string;
   updatedAt: string;

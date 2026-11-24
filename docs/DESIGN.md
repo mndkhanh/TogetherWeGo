@@ -1,6 +1,6 @@
 # TogetherWeGo — Product & Architecture Draft
 
-> Status: **v0.6** (2026-11-25). Phases 0 (skeleton), 1 (groups), 2 (expenses) and 3 (settle up) are built; see the README for running it. Later phases are still a draft.
+> Status: **v0.7** (2026-11-25). Phases 0 (skeleton), 1 (groups), 2 (expenses), 3 (settle up) and 4 (events) are built; see the README for running it. Later phases are still a draft.
 > Changes from v0.1: payments via **SePay**; **non-serverless** architecture (long-running containers on ECS/EC2 + RDS Postgres + Redis).
 
 ## 1. What it is
@@ -111,14 +111,22 @@ group_members(group_id, user_id, role ENUM(owner,admin,member), joined_at, left_
               PRIMARY KEY(group_id, user_id))
 group_invites(code PK, group_id, created_by, expires_at, max_uses NULL, uses, revoked_at)
 
-events(id, group_id, title, description, location, starts_at, ends_at,
-       status ENUM(scheduled,cancelled), created_by)
-event_rsvps(event_id, user_id, status ENUM(going,maybe,no), PRIMARY KEY(event_id,user_id))
-event_comments(id, event_id, user_id, body, created_at)
+events(id, group_id, title, description, location, starts_at TIMESTAMPTZ, ends_at NULL,
+       status ENUM(scheduled,cancelled), cancelled_at, created_by, version INT,
+       created_at, updated_at, UNIQUE(id, group_id))
+   -- CHECKs: title 1-80 chars, ends after it starts, cancelled <=> cancelled_at
+   -- never deleted; no end time = assumed 3 hours long for "upcoming" vs "past"
+event_rsvps(event_id, user_id, status ENUM(going,maybe,no), updated_at,
+            PRIMARY KEY(event_id,user_id))
+   -- kept when someone leaves, but only current members are counted or shown
+event_comments(id, event_id, author_id, body CHECK 1-1000 chars, deleted_at, deleted_by,
+               created_at)   -- plain text, soft-deleted by the author or an admin
 
 expenses(id, group_id, event_id NULL, payer_id, amount BIGINT CHECK > 0, currency, title, note,
          split_type ENUM(equal,exact,percent,shares), spent_on DATE, receipt_key, created_by,
-         deleted_at, version INT, created_at, updated_at)        -- event_id arrives in Phase 4
+         deleted_at, version INT, created_at, updated_at)
+   -- FOREIGN KEY (event_id, group_id) REFERENCES events(id, group_id): an expense can only be
+   --   linked to an event in its own group, even if the service had a bug
 expense_splits(expense_id, user_id, amount BIGINT CHECK >= 0, value INT,
                PRIMARY KEY(expense_id,user_id))
    -- value = what was entered: amount, basis points (percent) or shares
@@ -172,9 +180,11 @@ GET    /invites/:code               (preview)    POST /invites/:code/accept
 DELETE /groups/:id/members/:userId  (remove; your own id = leave)
 PATCH  /groups/:id/members/:userId  (change role, owner only; role=owner transfers ownership)
 
-GET    /groups/:id/events           POST  /groups/:id/events
-PATCH  /events/:id                  PUT   /events/:id/rsvp
-GET/POST /events/:id/comments
+GET    /groups/:id/events           POST  /groups/:id/events   (?when=upcoming|past, ?cursor)
+GET    /events/:id                  PATCH /events/:id   (whole event + version; 409 if changed)
+POST   /events/:id/cancel           PUT   /events/:id/rsvp
+GET    /events/:id/comments         POST  /events/:id/comments   (20/min)   DELETE /comments/:id
+GET    /groups/:id/expenses?eventId=   (expenses linked to one event)
 
 GET    /groups/:id/expenses         POST  /groups/:id/expenses     (?cursor, newest first)
 GET    /expenses/:id                (with history + 5-minute receipt link)
@@ -302,7 +312,7 @@ TogetherWeGo/
 | 1. Groups ✅ | Groups, roles (owner/admin/member), ownership transfer, archive, invite links with expiry, use limits and revoke. Email invites wait for Phase 5. |
 | 2. Money ✅ | Expenses (equal / exact / percent / shares), balances with suggested payments, receipt photos on S3, edit history, optimistic locking. Leaving needs a zero balance. |
 | 3. Settle up ✅ | Bank accounts, SePay QR, settlements (pay, record cash, partial/over payment), webhook auto-confirm, manual confirm, unmatched inbox |
-| 4. Events | Events, RSVP, comments, link expenses to events |
+| 4. Events ✅ | Events, RSVP, comments, cancel/reschedule, link expenses to events |
 | 5. Notifications | Outbox → BullMQ → in-app feed + Socket.IO + SES email, preferences |
 | 6. Reminders | Delayed and repeatable jobs for event and debt reminders |
 | 7. Polish | i18n (vi/en), PWA, prod hardening (Multi-AZ, alarms, WAF) |

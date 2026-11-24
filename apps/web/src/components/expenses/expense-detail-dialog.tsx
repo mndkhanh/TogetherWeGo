@@ -1,5 +1,6 @@
 import type { ExpenseDetailResponse, SplitType } from "@twg/shared"
 import { PencilIcon, Trash2Icon } from "lucide-react"
+import { Link } from "react-router"
 import { toast } from "sonner"
 
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -60,6 +61,18 @@ function Body({ expense, myUserId }: { expense: ExpenseDetailResponse; myUserId:
           ))}
         </ul>
       </section>
+
+      {expense.event && (
+        <p className="text-sm text-muted-foreground">
+          For{" "}
+          <Link
+            to={`/groups/${expense.groupId}/events/${expense.event.id}`}
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            {expense.event.title}
+          </Link>
+        </p>
+      )}
 
       {expense.note && (
         <section className="flex flex-col gap-1" aria-label="Note">

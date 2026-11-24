@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/lib/auth"
 import { clearReturnTo, peekReturnTo, rememberReturnTo } from "@/lib/return-to"
 import { AuthCallbackPage } from "@/pages/auth-callback-page"
+import { EventPage } from "@/pages/event-page"
 import { GroupPage } from "@/pages/group-page"
 import { HomePage } from "@/pages/home-page"
 import { InvitePage } from "@/pages/invite-page"
@@ -53,6 +54,7 @@ export function App() {
         <Route element={<RequireAuth />}>
           <Route index element={<HomePage />} />
           <Route path="groups/:groupId" element={<GroupPage />} />
+          <Route path="groups/:groupId/events/:eventId" element={<EventPage />} />
           <Route path="invite/:code" element={<InvitePage />} />
           <Route path="settings/payments" element={<PaymentSettingsPage />} />
         </Route>

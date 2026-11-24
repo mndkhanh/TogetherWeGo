@@ -74,6 +74,7 @@ function ExpenseRow({
           </span>
           <span className="truncate text-sm text-muted-foreground">
             {payer} paid {money(expense.amount, expense.currency)}
+            {expense.event && ` · ${expense.event.title}`}
           </span>
         </div>
         <span className={cn("shrink-0 text-right text-sm font-medium tabular-nums", part.tone)}>

@@ -16,12 +16,14 @@ type PersonRow = Pick<User, 'id' | 'name' | 'avatarKey'>;
 export const expenseInclude = {
   payer: { select: personSelect },
   creator: { select: personSelect },
+  event: { select: { id: true, title: true, startsAt: true } },
   splits: { include: { user: { select: personSelect } } },
 } as const;
 
 export type ExpenseWithPeople = Expense & {
   payer: PersonRow;
   creator: PersonRow;
+  event: { id: string; title: string; startsAt: Date } | null;
   splits: (ExpenseSplit & { user: PersonRow })[];
 };
 
@@ -66,6 +68,13 @@ export function toExpenseResponse(
     spentOn: fromDateOnly(expense.spentOn),
     note: expense.note,
     hasReceipt: expense.receiptKey !== null,
+    event: expense.event
+      ? {
+          id: expense.event.id,
+          title: expense.event.title,
+          startsAt: expense.event.startsAt.toISOString(),
+        }
+      : null,
     createdBy: toPerson(expense.creator),
     createdAt: expense.createdAt.toISOString(),
     updatedAt: expense.updatedAt.toISOString(),
@@ -88,6 +97,8 @@ export interface ExpenseSnapshot {
   spentOn: string;
   note: string | null;
   receiptKey: string | null;
+  /** Missing in entries written before events existed. */
+  eventId?: string | null;
 }
 
 export function snapshotOf(expense: Expense & { splits: ExpenseSplit[] }): ExpenseSnapshot {
@@ -103,6 +114,7 @@ export function snapshotOf(expense: Expense & { splits: ExpenseSplit[] }): Expen
     spentOn: fromDateOnly(expense.spentOn),
     note: expense.note,
     receiptKey: expense.receiptKey,
+    eventId: expense.eventId,
   };
 }
 
@@ -128,6 +140,9 @@ export function describeChanges(
   ) {
     const amounts = after.splits.map((s) => `${nameOf(s.userId)} ${money(s.amount)}`).join(', ');
     changes.push(`Split: ${amounts}`);
+  }
+  if ((before.eventId ?? null) !== (after.eventId ?? null)) {
+    changes.push(after.eventId ? 'Linked to an event' : 'Unlinked from its event');
   }
   if (before.note !== after.note) changes.push(after.note ? 'Note edited' : 'Note removed');
   if (before.receiptKey !== after.receiptKey) {

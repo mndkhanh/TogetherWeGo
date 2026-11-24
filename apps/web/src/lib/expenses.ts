@@ -45,6 +45,20 @@ export function useExpenses(groupId: string) {
   })
 }
 
+/** The expenses linked to one event, newest first, a page at a time. */
+export function useEventExpenses(groupId: string, eventId: string) {
+  return useInfiniteQuery({
+    // Under the group's expense key, so any expense change refreshes it too.
+    queryKey: [...expenseKeys.list(groupId), "event", eventId] as const,
+    queryFn: ({ pageParam }) =>
+      api<ExpensePageResponse>(
+        `/groups/${groupId}/expenses?eventId=${eventId}&limit=30${pageParam ? `&cursor=${pageParam}` : ""}`
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+  })
+}
+
 export function useExpense(expenseId: string | null) {
   return useQuery({
     queryKey: expenseKeys.detail(expenseId ?? ""),
@@ -77,6 +91,8 @@ function useExpenseMutation<TVariables, TResult>(
       }
       void queryClient.invalidateQueries({ queryKey: expenseKeys.list(groupId) })
       void queryClient.invalidateQueries({ queryKey: expenseKeys.balances(groupId) })
+      // An event's page shows what was spent for it.
+      void queryClient.invalidateQueries({ queryKey: ["events"] })
     },
   })
 }
