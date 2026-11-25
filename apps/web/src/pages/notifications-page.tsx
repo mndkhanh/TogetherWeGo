@@ -72,7 +72,8 @@ export function NotificationsPage() {
             </EmptyMedia>
             <EmptyTitle>No notifications yet</EmptyTitle>
             <EmptyDescription>
-              You’ll hear about new expenses you’re part of, events in your groups and payments.
+              You’ll hear about new expenses you’re part of, events in your groups, payments, and
+              reminders before events you’re going to.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

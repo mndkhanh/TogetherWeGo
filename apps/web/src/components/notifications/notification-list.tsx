@@ -1,7 +1,9 @@
 import type { NotificationResponse, NotificationType } from "@twg/shared"
 import {
+  AlarmClockIcon,
   BanknoteIcon,
   CalendarDaysIcon,
+  HandCoinsIcon,
   type LucideIcon,
   MessageCircleIcon,
   ReceiptTextIcon,
@@ -14,6 +16,8 @@ import { useMarkRead } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
 
 function iconFor(type: NotificationType): LucideIcon {
+  if (type === "event.reminder") return AlarmClockIcon
+  if (type === "debt.reminder") return HandCoinsIcon
   if (type.startsWith("expense.")) return ReceiptTextIcon
   if (type === "event.commented") return MessageCircleIcon
   if (type.startsWith("event.")) return CalendarDaysIcon

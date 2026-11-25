@@ -23,7 +23,7 @@ pnpm db:up                                      # Postgres :5432, Valkey :6380, 
 pnpm --filter @twg/shared build
 pnpm db:migrate
 pnpm dev                                        # API on :3100, web on http://localhost:5173
-pnpm dev:worker                                 # background worker: notifications and email (separate terminal)
+pnpm dev:worker                                 # background worker: notifications, email and reminders (separate terminal)
 ```
 
 Emails are caught by Mailpit locally: open http://localhost:8025.
@@ -99,6 +99,9 @@ aws ssm start-session --target <instance-id>            # shell on an ECS instan
 - Notifications use a transactional outbox: written in the same transaction as the change, so nothing is
   sent for a change that rolled back and nothing is lost if Redis or the worker is down. Fan-out is idempotent.
   People who have left a group never receive its notifications.
+- Reminders are planned in the database with the event, so a lost job only makes one late, never lost; each
+  is handled once. Debt reminders claim a 6-day cooldown per person and group in the same transaction, so a
+  retried job never nags twice.
 - The realtime WebSocket checks the Origin header and the CloudFront secret itself (it sits outside Nest's
   middleware), takes the access token in the handshake body (never a cookie or the URL), and hangs up when the
   token expires. Each socket can only join its own user's room.

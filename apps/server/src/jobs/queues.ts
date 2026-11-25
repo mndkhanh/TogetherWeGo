@@ -1,13 +1,15 @@
 import type { BullRootModuleOptions } from '@nestjs/bullmq';
 import type { AppConfig } from '../infra/config/env.schema.js';
 
-/** Queue names. Phase 6 adds `reminders`. */
+/** Queue names. */
 export const QUEUES = {
   system: 'system',
   /** Fan-out of outbox rows into notifications ("sweep" jobs). */
   notifications: 'notifications',
   /** One job per email, so a slow or failing mail server never holds up the feed. */
   email: 'email',
+  /** Event reminders (delayed jobs, plus a sweep) and the weekly debt reminders. */
+  reminders: 'reminders',
 } as const;
 
 export function bullRootOptions(config: AppConfig): BullRootModuleOptions {

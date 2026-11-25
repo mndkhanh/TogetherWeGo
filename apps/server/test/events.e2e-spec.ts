@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaService } from '../src/infra/prisma/prisma.service.js';
-import { as, createTestApp, registerUser, type TestUser } from './helpers.js';
+import { as, createTestApp, registerUser, removeReminderJobs, type TestUser } from './helpers.js';
 
 const PREFIX = `e2e-events-${randomUUID().slice(0, 8)}`;
 const HOUR = 3600 * 1000;
@@ -27,6 +27,7 @@ describe('Events (e2e)', () => {
   afterAll(async () => {
     const users = await prisma.user.findMany({ where: { email: { startsWith: PREFIX } } });
     const ids = users.map((u) => u.id);
+    await removeReminderJobs(app, prisma, ids);
     await prisma.group.deleteMany({ where: { createdBy: { in: ids } } });
     await prisma.user.deleteMany({ where: { id: { in: ids } } });
     await app.close();

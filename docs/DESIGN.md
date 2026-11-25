@@ -1,6 +1,6 @@
 # TogetherWeGo — Product & Architecture Draft
 
-> Status: **v0.8** (2026-11-25). Phases 0 (skeleton), 1 (groups), 2 (expenses), 3 (settle up), 4 (events) and 5 (notifications) are built; see the README for running it. Later phases are still a draft.
+> Status: **v0.9** (2026-11-26). Phases 0 (skeleton), 1 (groups), 2 (expenses), 3 (settle up), 4 (events), 5 (notifications) and 6 (reminders) are built; see the README for running it. Later phases are still a draft.
 > Changes from v0.1: payments via **SePay**; **non-serverless** architecture (long-running containers on ECS/EC2 + RDS Postgres + Redis).
 
 ## 1. What it is
@@ -238,11 +238,14 @@ Guards: `JwtAuthGuard` everywhere except auth and webhooks. `GroupMemberGuard` a
    - records an `email_deliveries` row per email in the same transaction; only after commit does it queue one `email` job per row (job id = row id). Nothing is emailed for a fan-out that rolled back, and the sweep re-queues any row still unsent after 2 minutes (lost job). The email job skips rows already sent and sets `sent_at` right after the provider accepts. SMTP to Mailpit locally, SES on AWS. Email is at-least-once: a crash between SES accepting and `sent_at` being written can repeat one (SES has no idempotency key). A digest for noisy types is a later improvement.
    - after commit, publishes through Redis (`@socket.io/redis-emitter`); the Socket.IO adapter on whichever `api` task holds the user's connection delivers it to room `user:<id>`
    - the WebSocket sits outside Nest's guards, so it repeats their checks: Origin must be the app (no cross-site WebSocket hijacking), the CloudFront secret header must be present, the access token is verified in the handshake and the socket is closed when it expires
-4. **Event reminders:** on event create or update, add BullMQ **delayed jobs** with deterministic IDs (`event:<id>:24h`, `event:<id>:1h`). On reschedule or cancel, remove and re-add them. The job re-checks the event status before sending.
-5. **Debt reminders:** a BullMQ **repeatable job** (e.g. Monday 9:00 Asia/Ho_Chi_Minh) finds non-zero balances and notifies debtors, with a per-pair cooldown.
+4. **Event reminders** (24 hours and 1 hour before):
+   - `event_reminders` rows are the record. They are written in the same transaction that creates, moves or cancels the event: moving deletes the ones not yet handled and plans new ones, cancelling only deletes. A reminder already due (or due within a minute) is never planned; the "new event" notification covers it.
+   - After commit, the `api` adds a BullMQ **delayed job** per row (job id = row id) and removes the jobs of deleted rows. The job is only for timing: a sweep every minute handles any due row whose job went missing.
+   - Handling locks the event (`FOR SHARE`, in the same order as an edit: event, then its reminders, so a move or cancel in flight finishes first and one that starts later waits) and then the row (`FOR UPDATE SKIP LOCKED`), re-checks the event (still scheduled, group not archived, not started yet; a late 24-hour reminder that would land inside the last hour is skipped), writes an `event.reminder` outbox row for everyone going or maybe, and marks the row `sent` or `skipped`. A row is handled once, so a doubled job never reminds twice.
+5. **Debt reminders:** a BullMQ **job scheduler** (cron `0 9 * * 1`, Asia/Ho_Chi_Minh: Monday 9:00) walks the non-archived groups with expenses. Per group, in one transaction: balances, then the suggested payments (the same ones the balances tab shows), then a `debt.reminder` to each current member who owes, naming who to pay. Skipped: anyone with a payment already pending in that group. The cooldown is per (group, person) in `debt_reminders`: an `INSERT … ON CONFLICT DO UPDATE … WHERE last_sent_at <= now − 6 days` claims the reminder, so a retried or doubled run never nags twice. A group that fails doesn't stop the others, but fails the job afterwards so BullMQ retries it; the cooldown makes the retry skip everyone already reminded.
 6. **Stale payments:** not a job. A pending payment older than 7 days is shown as stale (derived on read); a late transfer still confirms it, because the money really moved.
 
-Notification types: `group.invited`, `group.member_joined`, `event.created`, `event.updated`, `event.cancelled`, `event.reminder`, `expense.added`, `expense.updated`, `settlement.requested`, `settlement.confirmed`, `debt.reminder`, `transfer.unmatched`.
+Notification types: `group.member_joined`, `event.created`, `event.updated`, `event.cancelled`, `event.commented`, `event.reminder`, `expense.added`, `expense.updated`, `expense.deleted`, `settlement.requested`, `settlement.confirmed`, `settlement.cancelled`, `debt.reminder`, `transfer.unmatched`. Both reminder types are on in the app and by email by default, and can be turned off like any other.
 
 ## 7. Payments with SePay
 
@@ -328,7 +331,7 @@ TogetherWeGo/
 | 3. Settle up ✅ | Bank accounts, SePay QR, settlements (pay, record cash, partial/over payment), webhook auto-confirm, manual confirm, unmatched inbox |
 | 4. Events ✅ | Events, RSVP, comments, cancel/reschedule, link expenses to events |
 | 5. Notifications ✅ | Outbox → BullMQ → in-app feed + Socket.IO + email (SES / Mailpit), preferences |
-| 6. Reminders | Delayed and repeatable jobs for event and debt reminders |
+| 6. Reminders ✅ | Event reminders (24 h and 1 h before; delayed jobs + sweep), weekly debt reminders (job scheduler, 6-day cooldown) |
 | 7. Polish | i18n (vi/en), PWA, prod hardening (Multi-AZ, alarms, WAF) |
 
 ## 11. Open questions

@@ -48,6 +48,7 @@ model User {
   notifications     Notification[]
   notificationPrefs NotificationPreference[]
   emailDeliveries   EmailDelivery[]
+  debtReminders     DebtReminder[]
 
   @@map("users")
 }
@@ -89,13 +90,14 @@ model Group {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  creator     User          @relation("GroupCreator", fields: [createdBy], references: [id])
-  members     GroupMember[]
-  invites     GroupInvite[]
-  expenses    Expense[]
-  settlements Settlement[]
-  events      Event[]
-  activity    ActivityLog[]
+  creator       User           @relation("GroupCreator", fields: [createdBy], references: [id])
+  members       GroupMember[]
+  invites       GroupInvite[]
+  expenses      Expense[]
+  settlements   Settlement[]
+  events        Event[]
+  debtReminders DebtReminder[]
+  activity      ActivityLog[]
 
   @@map("groups")
 }
@@ -333,11 +335,12 @@ model Event {
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  creator  User           @relation(fields: [createdBy], references: [id])
-  rsvps    EventRsvp[]
-  comments EventComment[]
-  expenses Expense[]
+  group     Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator   User            @relation(fields: [createdBy], references: [id])
+  rsvps     EventRsvp[]
+  comments  EventComment[]
+  expenses  Expense[]
+  reminders EventReminder[]
 
   /// Target of the (event_id, group_id) foreign key from expenses.
   @@unique([id, groupId])
@@ -453,4 +456,40 @@ model EmailDelivery {
   @@unique([outboxId, userId])
   @@index([sentAt, createdAt])
   @@map("email_deliveries")
+}
+
+/// A reminder planned for an event: 24 hours and 1 hour before it starts. Written in the same
+/// transaction as the event, so it can't be lost. A delayed job (id = this row's id) fires it
+/// on time; a sweep catches any whose job went missing. Rescheduling or cancelling deletes the
+/// ones not yet handled. CHECK constraints: see the migration.
+model EventReminder {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  eventId   String    @map("event_id") @db.Uuid
+  /// "24h" or "1h".
+  kind      String
+  dueAt     DateTime  @map("due_at") @db.Timestamptz(3)
+  handledAt DateTime? @map("handled_at") @db.Timestamptz(3)
+  /// "sent" or "skipped" (the event was cancelled, had started, or a later reminder covers it).
+  outcome   String?
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([dueAt], map: "event_reminders_due_idx")
+  @@index([eventId])
+  @@map("event_reminders")
+}
+
+/// When someone was last reminded about what they owe in a group: the weekly job skips anyone
+/// reminded in the last 6 days, so a retried or doubled run never nags twice.
+model DebtReminder {
+  groupId    String   @map("group_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  lastSentAt DateTime @map("last_sent_at") @db.Timestamptz(3)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@map("debt_reminders")
 }

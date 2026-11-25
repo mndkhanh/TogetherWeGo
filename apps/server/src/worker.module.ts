@@ -7,8 +7,10 @@ import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { RedisModule } from './infra/redis/redis.module.js';
 import { EmailProcessor, NotificationsProcessor } from './jobs/notifications.processor.js';
 import { bullRootOptions, QUEUES } from './jobs/queues.js';
+import { RemindersProcessor } from './jobs/reminders.processor.js';
 import { SystemProcessor } from './jobs/system.processor.js';
 import { NotificationsCoreModule } from './notifications/notifications.module.js';
+import { RemindersModule } from './reminders/reminders.module.js';
 
 /** Root module of the background worker process (no HTTP server). */
 @Module({
@@ -21,9 +23,14 @@ import { NotificationsCoreModule } from './notifications/notifications.module.js
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => bullRootOptions(config),
     }),
-    BullModule.registerQueue({ name: QUEUES.system }, { name: QUEUES.notifications }),
+    BullModule.registerQueue(
+      { name: QUEUES.system },
+      { name: QUEUES.notifications },
+      { name: QUEUES.reminders },
+    ),
     NotificationsCoreModule,
+    RemindersModule,
   ],
-  providers: [SystemProcessor, NotificationsProcessor, EmailProcessor],
+  providers: [SystemProcessor, NotificationsProcessor, EmailProcessor, RemindersProcessor],
 })
 export class WorkerModule {}

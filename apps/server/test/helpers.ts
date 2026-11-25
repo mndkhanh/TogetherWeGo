@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication, Type } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import type { Queue } from 'bullmq';
 import request from 'supertest';
 import { ApiModule } from '../src/api.module.js';
 import { configureApp } from '../src/configure-app.js';
 import { APP_CONFIG } from '../src/infra/config/app-config.module.js';
 import { PrismaService } from '../src/infra/prisma/prisma.service.js';
+import { QUEUES } from '../src/jobs/queues.js';
 
 export const ORIGIN = 'http://localhost:5173';
 export const PASSWORD = 'correct-horse-battery';
@@ -44,6 +47,23 @@ export async function registerUser(
     .send({ email, password: PASSWORD, name })
     .expect(201);
   return { id: res.body.user.id, email, name, token: res.body.accessToken };
+}
+
+/**
+ * Takes the reminder jobs for these users' groups' events back out of Redis, so a local worker
+ * never runs them. Call before deleting the groups (the reminder rows go with them).
+ */
+export async function removeReminderJobs(
+  app: INestApplication,
+  prisma: PrismaService,
+  userIds: string[],
+): Promise<void> {
+  const queue = app.get<Queue>(getQueueToken(QUEUES.reminders));
+  const planned = await prisma.eventReminder.findMany({
+    where: { event: { group: { createdBy: { in: userIds } } } },
+    select: { id: true },
+  });
+  for (const r of planned) await (await queue.getJob(r.id))?.remove();
 }
 
 /** supertest agent bound to a user's access token. */

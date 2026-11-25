@@ -23,10 +23,13 @@ import { RealtimePublisher } from './realtime-publisher.service.js';
 })
 export class NotificationsModule {}
 
-/** Worker side (also used by tests): fan-out, email and pushing to browsers. */
+/**
+ * Worker side (also used by tests): fan-out, email and pushing to browsers, plus the outbox
+ * writer for notifications the worker starts itself (reminders).
+ */
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUES.email })],
-  providers: [FanoutService, MailerService, RealtimePublisher],
-  exports: [FanoutService, MailerService],
+  imports: [BullModule.registerQueue({ name: QUEUES.email }, { name: QUEUES.notifications })],
+  providers: [FanoutService, MailerService, RealtimePublisher, OutboxService],
+  exports: [FanoutService, MailerService, OutboxService],
 })
 export class NotificationsCoreModule {}

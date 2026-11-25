@@ -4,8 +4,7 @@ import type { PersonRef } from './expenses.js';
 
 /**
  * Everything that can notify someone. Each type has a default for the in-app feed and for
- * email; people can change both per type. Reminders (event.reminder, debt.reminder) arrive
- * with Phase 6.
+ * email; people can change both per type.
  */
 export const NOTIFICATION_TYPES = [
   'expense.added',
@@ -15,11 +14,13 @@ export const NOTIFICATION_TYPES = [
   'event.updated',
   'event.cancelled',
   'event.commented',
+  'event.reminder',
   'settlement.requested',
   'settlement.confirmed',
   'settlement.cancelled',
   'transfer.unmatched',
   'group.member_joined',
+  'debt.reminder',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -70,6 +71,12 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationType, NotificationTypeInf
     inApp: true,
     email: false,
   },
+  'event.reminder': {
+    label: 'Event reminders',
+    audience: 'A day and an hour before events you’re going to',
+    inApp: true,
+    email: true,
+  },
   'settlement.requested': {
     label: 'Someone is paying you',
     audience: 'Payments to you',
@@ -99,6 +106,12 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationType, NotificationTypeInf
     audience: 'Your groups',
     inApp: true,
     email: false,
+  },
+  'debt.reminder': {
+    label: 'What you still owe',
+    audience: 'Monday mornings, while you owe something',
+    inApp: true,
+    email: true,
   },
 };
 
@@ -140,6 +153,9 @@ export interface NotificationData {
   settlementId?: string;
   excerpt?: string;
   via?: 'sepay' | 'manual';
+  location?: string;
+  /** Debt reminders: who the suggested payments go to, largest first. */
+  creditorNames?: string[];
 }
 
 export interface NotificationResponse {
@@ -178,6 +194,14 @@ const MONEY_LOCALE: Record<Currency, string> = { VND: 'vi-VN', USD: 'en-US' };
 function money(amount: number | undefined, currency: Currency | undefined): string {
   if (amount === undefined || !currency) return '';
   return formatMoney(amount, currency, MONEY_LOCALE[currency]);
+}
+
+/** "An 150.000 ₫", or "150.000 ₫ to An and Bình", or "… to An, Bình and 2 others". */
+function owedTo(amount: string, names: string[] = []): string {
+  if (names.length === 1) return `${names[0]} ${amount}`;
+  if (names.length === 0) return amount;
+  if (names.length <= 3) return `${amount} to ${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return `${amount} to ${names.slice(0, 2).join(', ')} and ${names.length - 2} others`;
 }
 
 const whenFormat = new Intl.DateTimeFormat('en', {
@@ -259,5 +283,15 @@ export function describeNotification(
       };
     case 'group.member_joined':
       return { text: `${who} joined ${data.groupName}.`, link: `${group}?tab=members` };
+    case 'event.reminder':
+      return {
+        text: `Coming up: ${data.title} in ${data.groupName}, ${when}${data.location ? ` at ${data.location}` : ''}.`,
+        link: event,
+      };
+    case 'debt.reminder':
+      return {
+        text: `You owe ${owedTo(amount, data.creditorNames)} in ${data.groupName}.`,
+        link: balances,
+      };
   }
 }

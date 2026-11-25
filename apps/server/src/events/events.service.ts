@@ -26,6 +26,10 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { GroupAccessService } from '../groups/group-access.service.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
 import { OutboxService } from '../notifications/outbox.service.js';
+import {
+  EventReminderPlanner,
+  type ReminderChange,
+} from '../reminders/event-reminder-planner.service.js';
 import { personSelect } from '../expenses/expense-mappers.js';
 import {
   canEditEvent,
@@ -52,6 +56,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly access: GroupAccessService,
     private readonly outbox: OutboxService,
+    private readonly reminders: EventReminderPlanner,
   ) {}
 
   /**
@@ -136,6 +141,7 @@ export class EventsService {
   /** Any member can plan something. The person who creates it is going. */
   async create(groupId: string, userId: string, input: EventInput): Promise<EventDetailResponse> {
     await this.access.require(groupId, userId, { requireActive: true });
+    let planned: ReminderChange | undefined;
     const id = await this.prisma.$transaction(async (tx) => {
       await this.requireOpenGroup(tx, groupId, userId);
       const event = await tx.event.create({
@@ -154,14 +160,17 @@ export class EventsService {
         after: eventSnapshot(event),
       });
       await this.notify(tx, 'event.created', userId, event);
+      planned = await this.reminders.plan(tx, event.id, event.startsAt);
       return event.id;
     });
     this.outbox.kick();
+    if (planned) await this.reminders.schedule(planned);
     return this.get(id, userId);
   }
 
   async update(eventId: string, userId: string, input: EventUpdate): Promise<EventDetailResponse> {
     const { event } = await this.load(eventId, userId);
+    let planned: ReminderChange | undefined;
     await this.prisma.$transaction(async (tx) => {
       const role = await this.requireOpenGroup(tx, event.groupId, userId);
       this.assertCanEdit(event, userId, role);
@@ -190,14 +199,19 @@ export class EventsService {
         after.endsAt?.getTime() !== event.endsAt?.getTime() ||
         after.location !== event.location;
       if (moved) await this.notify(tx, 'event.updated', userId, after);
+      if (after.startsAt.getTime() !== event.startsAt.getTime()) {
+        planned = await this.reminders.plan(tx, eventId, after.startsAt);
+      }
     });
     this.outbox.kick();
+    if (planned) await this.reminders.schedule(planned);
     return this.get(eventId, userId);
   }
 
   /** Cancelling keeps the event, its comments and its expenses; nobody can RSVP any more. */
   async cancel(eventId: string, userId: string): Promise<EventDetailResponse> {
     const { event } = await this.load(eventId, userId);
+    let planned: ReminderChange | undefined;
     await this.prisma.$transaction(async (tx) => {
       const role = await this.requireOpenGroup(tx, event.groupId, userId);
       this.assertCanEdit(event, userId, role);
@@ -210,8 +224,10 @@ export class EventsService {
         before: eventSnapshot(event),
       });
       await this.notify(tx, 'event.cancelled', userId, event);
+      planned = await this.reminders.plan(tx, eventId, null);
     });
     this.outbox.kick();
+    if (planned) await this.reminders.schedule(planned);
     return this.get(eventId, userId);
   }
 
