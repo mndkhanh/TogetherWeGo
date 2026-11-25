@@ -13,6 +13,8 @@ import {
 import { ImageIcon, XIcon } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
+import type { TFunction } from "i18next"
+import { useTranslation } from "react-i18next"
 
 import { PersonAvatar } from "@/components/member-avatars"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -62,12 +64,7 @@ import { type FieldErrors, formErrorMessage, toFieldErrors, validate } from "@/l
 
 const NO_EVENT = "none"
 
-const SPLIT_LABEL: Record<SplitType, string> = {
-  equal: "Equally",
-  exact: "Amounts",
-  percent: "Percent",
-  shares: "Shares",
-}
+const SPLIT_TYPES: SplitType[] = ["equal", "exact", "percent", "shares"]
 
 /** What each person's input box holds, as typed. */
 type Entries = Record<string, { included: boolean; text: string }>
@@ -162,19 +159,20 @@ function remainderHint(
   state: FormState,
   amount: number | null,
   entries: { userId: string; value: number }[] | null,
-  currency: Currency
+  currency: Currency,
+  t: TFunction
 ): string | null {
   if (!entries) return null
   if (state.splitType === "exact" && amount !== null) {
     const left = amount - entries.reduce((sum, e) => sum + e.value, 0)
-    if (left > 0) return `${money(left, currency)} left to assign`
-    if (left < 0) return `${money(-left, currency)} too much`
+    if (left > 0) return t("expenseForm.leftToAssign", { value: money(left, currency) })
+    if (left < 0) return t("expenseForm.tooMuch", { value: money(-left, currency) })
     return null
   }
   if (state.splitType === "percent") {
     const left = 10_000 - entries.reduce((sum, e) => sum + e.value, 0)
-    if (left > 0) return `${left / 100}% left to assign`
-    if (left < 0) return `${-left / 100}% too much`
+    if (left > 0) return t("expenseForm.leftToAssign", { value: `${left / 100}%` })
+    if (left < 0) return t("expenseForm.tooMuch", { value: `${-left / 100}%` })
   }
   return null
 }
@@ -196,6 +194,7 @@ export function ExpenseFormDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useTranslation()
   const currency = group.currency
   const [state, setState] = React.useState(() => initialState(group, myUserId, expense, eventId))
   const upcoming = useEvents(group.id, "upcoming", open)
@@ -264,7 +263,7 @@ export function ExpenseFormDialog({
       ? computeSplits(amount, state.splitType, entries)
       : null
   const previewAmounts = new Map(preview?.ok ? preview.splits.map((s) => [s.userId, s.amount]) : [])
-  const hint = remainderHint(state, amount, entries, currency)
+  const hint = remainderHint(state, amount, entries, currency, t)
 
   async function onPickReceipt(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -278,7 +277,7 @@ export function ExpenseFormDialog({
       toast.error(
         error instanceof ReceiptError
           ? error.message
-          : (formErrorMessage(error) ?? "The photo didn't upload. Try again.")
+          : (formErrorMessage(error) ?? t("receipt.uploadFailed"))
       )
     } finally {
       setUploading(false)
@@ -291,17 +290,15 @@ export function ExpenseFormDialog({
     const errors: FieldErrors = {}
     if (amount === null) {
       errors.amount =
-        CURRENCY_DECIMALS[currency] === 0
-          ? "Enter an amount, like 150.000"
-          : "Enter an amount, like 12.50"
+        CURRENCY_DECIMALS[currency] === 0 ? t("expenseForm.amountVnd") : t("expenseForm.amountUsd")
     }
     if (entries === null) {
       errors.splits =
         state.splitType === "percent"
-          ? "Use percentages like 25 or 33.33"
+          ? t("expenseForm.percentages")
           : state.splitType === "shares"
-            ? "Use whole numbers of shares"
-            : "Check the amounts"
+            ? t("expenseForm.wholeShares")
+            : t("expenseForm.checkAmounts")
     }
 
     const receiptKey =
@@ -325,10 +322,10 @@ export function ExpenseFormDialog({
     try {
       if (expense) {
         await update.mutateAsync({ ...data, version: expense.version })
-        toast.success("Expense updated")
+        toast.success(t("expenseForm.updated"))
       } else {
         await create.mutateAsync(data as CreateExpenseInput)
-        toast.success(`Added ${data.title}`)
+        toast.success(t("expenseForm.added", { title: data.title }))
       }
       onOpenChange(false)
     } catch (error) {
@@ -339,23 +336,25 @@ export function ExpenseFormDialog({
 
   const peopleLabel =
     state.splitType === "equal"
-      ? "Who shared it"
+      ? t("expenseForm.whoShared")
       : state.splitType === "exact"
-        ? "How much each person had"
+        ? t("expenseForm.howMuchEach")
         : state.splitType === "percent"
-          ? "Each person's percentage"
-          : "Each person's shares"
+          ? t("expenseForm.eachPercent")
+          : t("expenseForm.eachShares")
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>{expense ? "Edit expense" : "Add an expense"}</DialogTitle>
+            <DialogTitle>
+              {expense ? t("expenseForm.editTitle") : t("expenseForm.addTitle")}
+            </DialogTitle>
             <DialogDescription>
               {expense
-                ? "Everyone in the group can see what changed."
-                : `Everyone in ${group.name} will see it in their balance.`}
+                ? t("expenseForm.editHint")
+                : t("expenseForm.addHint", { group: group.name })}
             </DialogDescription>
           </DialogHeader>
 
@@ -367,12 +366,12 @@ export function ExpenseFormDialog({
 
           <FieldGroup>
             <Field data-invalid={!!fieldErrors.title || undefined}>
-              <FieldLabel htmlFor="expense-title">What was it for?</FieldLabel>
+              <FieldLabel htmlFor="expense-title">{t("expenseForm.whatFor")}</FieldLabel>
               <Input
                 id="expense-title"
                 value={state.title}
                 onChange={(e) => set("title", e.target.value)}
-                placeholder="Bánh xèo dinner, Grab to the airport"
+                placeholder={t("expenseForm.titlePlaceholder")}
                 aria-invalid={!!fieldErrors.title || undefined}
                 autoFocus
               />
@@ -381,7 +380,7 @@ export function ExpenseFormDialog({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field data-invalid={!!fieldErrors.amount || undefined}>
-                <FieldLabel htmlFor="expense-amount">Amount</FieldLabel>
+                <FieldLabel htmlFor="expense-amount">{t("expenseForm.amount")}</FieldLabel>
                 <InputGroup>
                   <InputGroupInput
                     id="expense-amount"
@@ -403,7 +402,7 @@ export function ExpenseFormDialog({
               </Field>
 
               <Field data-invalid={!!fieldErrors.spentOn || undefined}>
-                <FieldLabel htmlFor="expense-date">Date</FieldLabel>
+                <FieldLabel htmlFor="expense-date">{t("expenseForm.date")}</FieldLabel>
                 <Input
                   id="expense-date"
                   type="date"
@@ -417,11 +416,11 @@ export function ExpenseFormDialog({
             </div>
 
             <Field data-invalid={!!fieldErrors.payerId || undefined}>
-              <FieldLabel htmlFor="expense-payer">Paid by</FieldLabel>
+              <FieldLabel htmlFor="expense-payer">{t("expenseForm.paidBy")}</FieldLabel>
               <Select
                 items={group.members.map((m) => ({
                   value: m.userId,
-                  label: m.userId === myUserId ? `${m.name} (you)` : m.name,
+                  label: m.userId === myUserId ? t("balances.nameYou", { name: m.name }) : m.name,
                 }))}
                 value={state.payerId}
                 onValueChange={(value) => value && set("payerId", value as string)}
@@ -433,7 +432,7 @@ export function ExpenseFormDialog({
                   <SelectGroup>
                     {group.members.map((m) => (
                       <SelectItem key={m.userId} value={m.userId}>
-                        {m.userId === myUserId ? `${m.name} (you)` : m.name}
+                        {m.userId === myUserId ? t("balances.nameYou", { name: m.name }) : m.name}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -443,7 +442,7 @@ export function ExpenseFormDialog({
             </Field>
 
             <FieldSet data-invalid={!!fieldErrors.splits || undefined}>
-              <FieldLegend variant="label">Split</FieldLegend>
+              <FieldLegend variant="label">{t("expenseForm.split")}</FieldLegend>
               <ToggleGroup
                 variant="outline"
                 value={[state.splitType]}
@@ -452,9 +451,9 @@ export function ExpenseFormDialog({
                 }
                 className="w-full"
               >
-                {(Object.keys(SPLIT_LABEL) as SplitType[]).map((type) => (
+                {SPLIT_TYPES.map((type) => (
                   <ToggleGroupItem key={type} value={type} className="flex-1">
-                    {SPLIT_LABEL[type]}
+                    {t(`expenseForm.splitLabel.${type}`)}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
@@ -478,7 +477,9 @@ export function ExpenseFormDialog({
                       ) : null}
                       <PersonAvatar person={member} size="sm" />
                       <label htmlFor={inputId} className="min-w-0 flex-1 truncate text-sm">
-                        {member.userId === myUserId ? `${member.name} (you)` : member.name}
+                        {member.userId === myUserId
+                          ? t("balances.nameYou", { name: member.name })
+                          : member.name}
                       </label>
                       {state.splitType !== "equal" && (
                         <InputGroup className="w-32">
@@ -516,9 +517,9 @@ export function ExpenseFormDialog({
 
             {eventOptions.length > 0 && (
               <Field data-invalid={!!fieldErrors.eventId || undefined}>
-                <FieldLabel htmlFor="expense-event">Event (optional)</FieldLabel>
+                <FieldLabel htmlFor="expense-event">{t("expenseForm.event")}</FieldLabel>
                 <Select
-                  items={[{ value: NO_EVENT, label: "Not for an event" }, ...eventOptions]}
+                  items={[{ value: NO_EVENT, label: t("expenseForm.noEvent") }, ...eventOptions]}
                   value={state.eventId ?? NO_EVENT}
                   onValueChange={(value) =>
                     set("eventId", value === NO_EVENT || !value ? null : (value as string))
@@ -529,7 +530,7 @@ export function ExpenseFormDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value={NO_EVENT}>Not for an event</SelectItem>
+                      <SelectItem value={NO_EVENT}>{t("expenseForm.noEvent")}</SelectItem>
                       {eventOptions.map((e) => (
                         <SelectItem key={e.value} value={e.value}>
                           {e.label}
@@ -543,7 +544,7 @@ export function ExpenseFormDialog({
             )}
 
             <Field data-invalid={!!fieldErrors.note || undefined}>
-              <FieldLabel htmlFor="expense-note">Note (optional)</FieldLabel>
+              <FieldLabel htmlFor="expense-note">{t("expenseForm.note")}</FieldLabel>
               <Textarea
                 id="expense-note"
                 value={state.note}
@@ -555,7 +556,7 @@ export function ExpenseFormDialog({
             </Field>
 
             <Field>
-              <FieldLabel>Receipt photo (optional)</FieldLabel>
+              <FieldLabel>{t("expenseForm.receiptPhoto")}</FieldLabel>
               <input
                 ref={fileInput}
                 type="file"
@@ -569,7 +570,7 @@ export function ExpenseFormDialog({
                   {state.receiptPreview && (
                     <img
                       src={state.receiptPreview}
-                      alt="Receipt"
+                      alt={t("expenseForm.receipt")}
                       className="size-16 rounded-md border object-cover"
                     />
                   )}
@@ -582,7 +583,7 @@ export function ExpenseFormDialog({
                     }
                   >
                     <XIcon data-icon="inline-start" />
-                    Remove photo
+                    {t("expenseForm.removePhoto")}
                   </Button>
                 </div>
               ) : (
@@ -598,7 +599,7 @@ export function ExpenseFormDialog({
                   ) : (
                     <ImageIcon data-icon="inline-start" />
                   )}
-                  {uploading ? "Uploading…" : "Add a photo"}
+                  {uploading ? t("expenseForm.uploading") : t("expenseForm.addPhoto")}
                 </Button>
               )}
               <FieldError>{fieldErrors.receiptKey}</FieldError>
@@ -608,7 +609,7 @@ export function ExpenseFormDialog({
           <DialogFooter>
             <Button type="submit" disabled={pending || uploading}>
               {pending && <Spinner data-icon="inline-start" />}
-              {expense ? "Save changes" : "Add expense"}
+              {expense ? t("common.saveChanges") : t("group.addExpense")}
             </Button>
           </DialogFooter>
         </form>

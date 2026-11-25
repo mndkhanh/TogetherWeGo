@@ -9,6 +9,15 @@ provider "aws" {
   }
 }
 
+# CloudFront's WAF must live in us-east-1.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+  default_tags {
+    tags = { Project = "togetherwego", Environment = "dev", ManagedBy = "terraform" }
+  }
+}
+
 # Shared between CloudFront (adds the header) and the ALB/app (require it).
 resource "random_password" "origin_verify" {
   length  = 48
@@ -48,12 +57,20 @@ locals {
   receipts_origin = "https://${local.receipts_bucket}.s3.${data.aws_region.current.region}.amazonaws.com"
 }
 
+module "waf" {
+  count     = var.enable_waf ? 1 : 0
+  source    = "../../modules/waf"
+  providers = { aws = aws.us_east_1 }
+  name      = local.name
+}
+
 module "web" {
   source               = "../../modules/web"
   name                 = local.name
   alb_dns_name         = module.cluster.alb_dns_name
   origin_verify_secret = random_password.origin_verify.result
   upload_origins       = [local.receipts_origin]
+  web_acl_arn          = var.enable_waf ? module.waf[0].web_acl_arn : null
 }
 
 module "storage" {
@@ -95,4 +112,20 @@ module "github_oidc" {
   pass_role_arns       = module.services.task_role_arns
   web_bucket_arn       = module.web.bucket_arn
   distribution_arn     = module.web.distribution_arn
+}
+
+module "monitoring" {
+  source                      = "../../modules/monitoring"
+  name                        = local.name
+  alarm_emails                = var.alarm_emails
+  alb_arn_suffix              = module.cluster.alb_arn_suffix
+  api_target_group_arn_suffix = module.cluster.api_target_group_arn_suffix
+  cluster_name                = module.cluster.cluster_name
+  services = {
+    (module.services.service_names.api)    = 2
+    (module.services.service_names.worker) = 1
+  }
+  db_instance_identifier  = module.data.db_instance_identifier
+  redis_cache_cluster_ids = module.data.redis_cache_cluster_ids
+  worker_log_group_name   = module.services.log_group_names["worker"]
 }

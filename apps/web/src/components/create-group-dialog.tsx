@@ -2,6 +2,7 @@ import { createGroupSchema } from "@twg/shared"
 import { PlusIcon } from "lucide-react"
 import * as React from "react"
 import { useNavigate } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { type Currency, CurrencyToggle } from "@/components/currency-toggle"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -23,6 +24,7 @@ import { type FieldErrors, formErrorMessage, toFieldErrors, validate } from "@/l
 import { useCreateGroup } from "@/lib/groups"
 
 export function CreateGroupDialog({ defaultCurrency }: { defaultCurrency: Currency }) {
+  const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const [currency, setCurrency] = React.useState<Currency>(defaultCurrency)
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
@@ -60,15 +62,13 @@ export function CreateGroupDialog({ defaultCurrency }: { defaultCurrency: Curren
     <Dialog open={open} onOpenChange={reset}>
       <DialogTrigger render={<Button />}>
         <PlusIcon data-icon="inline-start" />
-        New group
+        {t("createGroup.newGroup")}
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>New group</DialogTitle>
-            <DialogDescription>
-              You'll get a link to invite your friends once the group is created.
-            </DialogDescription>
+            <DialogTitle>{t("createGroup.newGroup")}</DialogTitle>
+            <DialogDescription>{t("createGroup.hint")}</DialogDescription>
           </DialogHeader>
 
           {formError && (
@@ -79,18 +79,18 @@ export function CreateGroupDialog({ defaultCurrency }: { defaultCurrency: Curren
 
           <FieldGroup>
             <Field data-invalid={!!fieldErrors.name || undefined}>
-              <FieldLabel htmlFor="group-name">Group name</FieldLabel>
+              <FieldLabel htmlFor="group-name">{t("createGroup.name")}</FieldLabel>
               <Input
                 id="group-name"
                 name="name"
-                placeholder="Đà Lạt trip, Friday futsal, Flat 302"
+                placeholder={t("createGroup.namePlaceholder")}
                 aria-invalid={!!fieldErrors.name || undefined}
                 autoFocus
               />
               <FieldError>{fieldErrors.name}</FieldError>
             </Field>
             <Field>
-              <FieldLabel htmlFor="group-currency">Currency</FieldLabel>
+              <FieldLabel htmlFor="group-currency">{t("createGroup.currency")}</FieldLabel>
               <CurrencyToggle id="group-currency" value={currency} onChange={setCurrency} />
             </Field>
           </FieldGroup>
@@ -98,7 +98,7 @@ export function CreateGroupDialog({ defaultCurrency }: { defaultCurrency: Curren
           <DialogFooter>
             <Button type="submit" disabled={createGroup.isPending}>
               {createGroup.isPending && <Spinner data-icon="inline-start" />}
-              Create group
+              {t("createGroup.create")}
             </Button>
           </DialogFooter>
         </form>

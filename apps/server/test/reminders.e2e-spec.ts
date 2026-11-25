@@ -4,6 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaService } from '../src/infra/prisma/prisma.service.js';
+import { BacklogService } from '../src/jobs/backlog.service.js';
 import { QUEUES } from '../src/jobs/queues.js';
 import { FanoutService } from '../src/notifications/fanout.service.js';
 import { RemindersModule } from '../src/reminders/reminders.module.js';
@@ -185,9 +186,14 @@ describe('Reminders (e2e)', () => {
     await (await reminderQueue.getJob(dayBefore!.id))?.remove();
     await prisma.eventReminder.update({
       where: { id: dayBefore!.id },
-      data: { dueAt: new Date(Date.now() - 60_000) },
+      data: { dueAt: new Date(Date.now() - 10 * 60_000) },
     });
+    // The heartbeat reports it as overdue until the sweep catches up.
+    const backlog = new BacklogService(prisma);
+    const before = (await backlog.measure()).reminderBacklog;
+    expect(before).toBeGreaterThanOrEqual(1);
     expect(await reminders.sweepEventReminders()).toBeGreaterThanOrEqual(1);
+    expect((await backlog.measure()).reminderBacklog).toBeLessThan(before);
     const row = await prisma.eventReminder.findUniqueOrThrow({ where: { id: dayBefore!.id } });
     expect(row.outcome).toBe('sent');
   });

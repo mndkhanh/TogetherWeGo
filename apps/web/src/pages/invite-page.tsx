@@ -1,6 +1,7 @@
 import { LinkIcon } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { AppShell } from "@/components/app-shell"
 import { Button } from "@/components/ui/button"
@@ -22,23 +23,25 @@ import {
 } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { translateMessage } from "@/i18n/messages"
 import { ApiError } from "@/lib/api"
 import { formErrorMessage } from "@/lib/form-errors"
 import { useAcceptInvite, useInvitePreview } from "@/lib/groups"
 
 function InvalidInvite({ message }: { message: string }) {
+  const { t } = useTranslation()
   return (
     <Empty className="border border-dashed bg-card">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <LinkIcon />
         </EmptyMedia>
-        <EmptyTitle>This invite link doesn't work</EmptyTitle>
+        <EmptyTitle>{t("invite.invalidTitle")}</EmptyTitle>
         <EmptyDescription>{message}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
         <Button render={<Link to="/" />} nativeButton={false}>
-          Go to your groups
+          {t("invite.goToGroups")}
         </Button>
       </EmptyContent>
     </Empty>
@@ -46,6 +49,7 @@ function InvalidInvite({ message }: { message: string }) {
 }
 
 export function InvitePage() {
+  const { t } = useTranslation()
   const { code = "" } = useParams()
   const navigate = useNavigate()
   const preview = useInvitePreview(code)
@@ -54,10 +58,10 @@ export function InvitePage() {
   async function join() {
     try {
       const { groupId } = await accept.mutateAsync()
-      toast.success(`You joined ${preview.data?.groupName ?? "the group"}`)
+      toast.success(t("invite.joined", { group: preview.data?.groupName ?? t("invite.theGroup") }))
       navigate(`/groups/${groupId}`, { replace: true })
     } catch (error) {
-      toast.error(formErrorMessage(error) ?? "Couldn't join the group. Try again.")
+      toast.error(formErrorMessage(error) ?? t("invite.joinFailed"))
     }
   }
 
@@ -70,8 +74,8 @@ export function InvitePage() {
           <InvalidInvite
             message={
               preview.error instanceof ApiError
-                ? preview.error.message
-                : "Can't reach the server. Check your connection and try again."
+                ? translateMessage(preview.error.message)
+                : t("errors.offline")
             }
           />
         )}
@@ -79,17 +83,19 @@ export function InvitePage() {
         {preview.data && (
           <Card>
             <CardHeader>
-              <CardDescription>{preview.data.invitedBy} invited you to join</CardDescription>
+              <CardDescription>
+                {t("invite.invitedBy", { name: preview.data.invitedBy })}
+              </CardDescription>
               <CardTitle className="text-3xl font-extrabold tracking-tight break-words">
                 {preview.data.groupName}
               </CardTitle>
             </CardHeader>
             <CardContent className="text-muted-foreground">
               {preview.data.alreadyMember
-                ? "You're already a member of this group."
+                ? t("invite.alreadyMember")
                 : preview.data.memberCount === 1
-                  ? "You'll be the second member."
-                  : `${preview.data.memberCount} people are already in this group.`}
+                  ? t("invite.secondMember")
+                  : t("invite.memberCount", { count: preview.data.memberCount })}
             </CardContent>
             <CardFooter>
               {preview.data.alreadyMember ? (
@@ -98,12 +104,12 @@ export function InvitePage() {
                   render={<Link to={`/groups/${preview.data.groupId}`} />}
                   nativeButton={false}
                 >
-                  Open group
+                  {t("invite.openGroup")}
                 </Button>
               ) : (
                 <Button className="w-full" onClick={() => void join()} disabled={accept.isPending}>
                   {accept.isPending && <Spinner data-icon="inline-start" />}
-                  Join {preview.data.groupName}
+                  {t("invite.join", { group: preview.data.groupName })}
                 </Button>
               )}
             </CardFooter>

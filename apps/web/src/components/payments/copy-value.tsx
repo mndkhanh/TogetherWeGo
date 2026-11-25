@@ -1,6 +1,7 @@
 import { CheckIcon, CopyIcon } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import {
   InputGroup,
@@ -22,16 +23,17 @@ export function CopyValue({
   label: string
   mono?: boolean
 }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = React.useState(false)
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(value)
       setCopied(true)
-      toast.success(`${label} copied`)
+      toast.success(t("copy.copied", { label }))
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
-      toast.error("Couldn't copy. Select the text and copy it yourself.")
+      toast.error(t("copy.failed"))
     }
   }
 
@@ -48,7 +50,7 @@ export function CopyValue({
         <InputGroupButton
           size="icon-xs"
           onClick={() => void copy()}
-          aria-label={`Copy ${label.toLowerCase()}`}
+          aria-label={t("copy.aria", { label: label.toLowerCase() })}
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </InputGroupButton>

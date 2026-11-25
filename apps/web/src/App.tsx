@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useTranslation } from "react-i18next"
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router"
 
 import { Spinner } from "@/components/ui/spinner"
@@ -17,8 +18,9 @@ import { PaymentSettingsPage } from "@/pages/payment-settings-page"
 import { RegisterPage } from "@/pages/register-page"
 
 function FullPageSpinner() {
+  const { t } = useTranslation()
   return (
-    <div className="flex min-h-svh items-center justify-center" aria-label="Loading">
+    <div className="flex min-h-svh items-center justify-center" aria-label={t("common.loading")}>
       <Spinner />
     </div>
   )

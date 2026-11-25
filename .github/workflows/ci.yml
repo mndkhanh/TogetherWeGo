@@ -65,6 +65,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
+      - run: pnpm --filter @twg/web check:i18n
       - run: pnpm --filter @twg/shared build
       - run: pnpm typecheck
       - run: pnpm test
@@ -99,3 +100,5 @@ jobs:
       - run: terraform fmt -check -recursive infra
       - run: terraform -chdir=infra/envs/dev init -backend=false -input=false
       - run: terraform -chdir=infra/envs/dev validate
+      - run: terraform -chdir=infra/envs/prod init -backend=false -input=false
+      - run: terraform -chdir=infra/envs/prod validate

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import {
   Avatar,
   AvatarFallback,
@@ -34,7 +35,7 @@ export function PersonAvatar({
 export function MemberAvatars({
   people,
   total,
-  label = `${total} members`,
+  label,
   size,
 }: {
   people: Person[]
@@ -42,9 +43,10 @@ export function MemberAvatars({
   label?: string
   size?: "default" | "sm"
 }) {
+  const { t } = useTranslation()
   const shown = people.slice(0, 4)
   return (
-    <AvatarGroup aria-label={label}>
+    <AvatarGroup aria-label={label ?? t("home.members", { count: total })}>
       {shown.map((person) => (
         <PersonAvatar key={person.userId} person={person} size={size} />
       ))}

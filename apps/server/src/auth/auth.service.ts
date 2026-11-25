@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
-import type { AuthResponse, LoginInput, RegisterInput } from '@twg/shared';
+import type { AuthResponse, Locale, LoginInput, RegisterInput } from '@twg/shared';
 import { Prisma, type User } from '../generated/prisma/client.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
 import { toMeResponse } from '../users/users.service.js';
@@ -29,7 +29,13 @@ export class AuthService {
     const passwordHash = await this.passwords.hash(input.password);
     try {
       const user = await this.prisma.user.create({
-        data: { email: input.email, name: input.name, passwordHash },
+        data: {
+          email: input.email,
+          name: input.name,
+          passwordHash,
+          ...(input.locale && { locale: input.locale }),
+          ...(input.timeZone && { timeZone: input.timeZone }),
+        },
       });
       return this.startSession(user, userAgent);
     } catch (error) {
@@ -72,7 +78,12 @@ export class AuthService {
    * emails aren't verified at registration yet, so someone could pre-register a victim's email
    * and then keep access after the victim signs in with Google.
    */
-  async signInWithGoogle(profile: GoogleProfile, userAgent?: string): Promise<IssuedRefreshToken> {
+  async signInWithGoogle(
+    profile: GoogleProfile,
+    userAgent?: string,
+    /** The language and time zone the web app was in, for a brand-new account. */
+    prefs: { locale?: Locale; timeZone?: string } = {},
+  ): Promise<IssuedRefreshToken> {
     let user = await this.prisma.user.findUnique({ where: { googleSub: profile.sub } });
 
     if (!user) {
@@ -86,6 +97,8 @@ export class AuthService {
           name: profile.name,
           googleSub: profile.sub,
           avatarKey: profile.picture,
+          ...(prefs.locale && { locale: prefs.locale }),
+          ...(prefs.timeZone && { timeZone: prefs.timeZone }),
         },
       });
     }

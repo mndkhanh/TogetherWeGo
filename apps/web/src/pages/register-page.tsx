@@ -1,6 +1,7 @@
 import { registerSchema } from "@twg/shared"
 import * as React from "react"
 import { Link } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { AuthLayout } from "@/components/auth-layout"
 import { GoogleSignIn } from "@/components/google-button"
@@ -14,6 +15,7 @@ import { useAuth } from "@/lib/auth"
 import { type FieldErrors, formErrorMessage, toFieldErrors, validate } from "@/lib/form-errors"
 
 export function RegisterPage() {
+  const { t } = useTranslation()
   const { register } = useAuth()
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [formError, setFormError] = React.useState<string | null>(null)
@@ -43,14 +45,14 @@ export function RegisterPage() {
     <AuthLayout>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-bold tracking-tight">Create an account</h2>
+          <h2 className="text-2xl font-bold tracking-tight">{t("auth.createAnAccount")}</h2>
           <p className="text-muted-foreground">
-            Already have one?{" "}
+            {t("auth.alreadyHaveOne")}{" "}
             <Link
               to="/login"
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              Sign in
+              {t("auth.signIn")}
             </Link>
           </p>
         </div>
@@ -64,7 +66,7 @@ export function RegisterPage() {
         <form onSubmit={onSubmit} noValidate>
           <FieldGroup>
             <Field data-invalid={!!fieldErrors.name || undefined}>
-              <FieldLabel htmlFor="name">Your name</FieldLabel>
+              <FieldLabel htmlFor="name">{t("auth.yourName")}</FieldLabel>
               <Input
                 id="name"
                 name="name"
@@ -72,11 +74,11 @@ export function RegisterPage() {
                 aria-invalid={!!fieldErrors.name || undefined}
                 autoFocus
               />
-              <FieldDescription>This is what your friends see in groups.</FieldDescription>
+              <FieldDescription>{t("auth.nameHint")}</FieldDescription>
               <FieldError>{fieldErrors.name}</FieldError>
             </Field>
             <Field data-invalid={!!fieldErrors.email || undefined}>
-              <FieldLabel htmlFor="email">Email</FieldLabel>
+              <FieldLabel htmlFor="email">{t("auth.email")}</FieldLabel>
               <Input
                 id="email"
                 name="email"
@@ -87,7 +89,7 @@ export function RegisterPage() {
               <FieldError>{fieldErrors.email}</FieldError>
             </Field>
             <Field data-invalid={!!fieldErrors.password || undefined}>
-              <FieldLabel htmlFor="password">Password</FieldLabel>
+              <FieldLabel htmlFor="password">{t("auth.password")}</FieldLabel>
               <Input
                 id="password"
                 name="password"
@@ -95,14 +97,14 @@ export function RegisterPage() {
                 autoComplete="new-password"
                 aria-invalid={!!fieldErrors.password || undefined}
               />
-              <FieldDescription>At least 10 characters.</FieldDescription>
+              <FieldDescription>{t("auth.passwordHint")}</FieldDescription>
               <FieldError>{fieldErrors.password}</FieldError>
             </Field>
             <Button type="submit" size="lg" className="w-full" disabled={pending}>
               {pending && <Spinner data-icon="inline-start" />}
-              Create account
+              {t("auth.createAccount")}
             </Button>
-            <GoogleSignIn label="Sign up with Google" />
+            <GoogleSignIn label={t("auth.signUpWithGoogle")} />
           </FieldGroup>
         </form>
       </div>

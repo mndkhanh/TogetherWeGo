@@ -13,6 +13,7 @@ import {
 import * as React from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { AppShell, useMe } from "@/components/app-shell"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
@@ -53,6 +54,7 @@ import { formErrorMessage } from "@/lib/form-errors"
 import { useGroup, useRemoveMember, useSetArchived } from "@/lib/groups"
 
 function BackLink() {
+  const { t } = useTranslation()
   return (
     <Button
       variant="ghost"
@@ -62,26 +64,25 @@ function BackLink() {
       nativeButton={false}
     >
       <ArrowLeftIcon data-icon="inline-start" />
-      All groups
+      {t("group.allGroups")}
     </Button>
   )
 }
 
 function GroupNotFound() {
+  const { t } = useTranslation()
   return (
     <Empty className="border border-dashed bg-card">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <SearchXIcon />
         </EmptyMedia>
-        <EmptyTitle>You're not in this group</EmptyTitle>
-        <EmptyDescription>
-          It may have been deleted, or you left or were removed. Ask a member for a new invite link.
-        </EmptyDescription>
+        <EmptyTitle>{t("group.notInGroup")}</EmptyTitle>
+        <EmptyDescription>{t("group.notInGroupHint")}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
         <Button render={<Link to="/" />} nativeButton={false}>
-          Go to your groups
+          {t("invite.goToGroups")}
         </Button>
       </EmptyContent>
     </Empty>
@@ -89,6 +90,7 @@ function GroupNotFound() {
 }
 
 export function GroupPage() {
+  const { t } = useTranslation()
   const { groupId = "" } = useParams()
   const me = useMe()
   const navigate = useNavigate()
@@ -127,9 +129,9 @@ export function GroupPage() {
         ) : (
           <Alert variant="destructive">
             <AlertDescription className="flex items-center justify-between gap-4">
-              Couldn't load this group.
+              {t("group.loadFailed")}
               <Button variant="outline" size="sm" onClick={() => void group.refetch()}>
-                Try again
+                {t("common.tryAgain")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -145,17 +147,15 @@ export function GroupPage() {
 
   function confirmArchive(next: boolean) {
     setConfirm({
-      title: next ? `Archive ${data.name}?` : `Unarchive ${data.name}?`,
-      description: next
-        ? "Nobody can change the group or join it while it's archived. You can unarchive it at any time."
-        : "Members can make changes and use invite links again.",
-      confirmLabel: next ? "Archive group" : "Unarchive group",
+      title: t(next ? "group.archiveTitle" : "group.unarchiveTitle", { name: data.name }),
+      description: t(next ? "group.archiveHint" : "group.unarchiveHint"),
+      confirmLabel: t(next ? "group.archive" : "group.unarchive"),
       onConfirm: async () => {
         try {
           await setArchived.mutateAsync(next)
-          toast.success(next ? "Group archived" : "Group unarchived")
+          toast.success(t(next ? "group.archived" : "group.unarchived"))
         } catch (error) {
-          toast.error(formErrorMessage(error) ?? "Something went wrong. Try again.")
+          toast.error(formErrorMessage(error) ?? t("group.somethingWrong"))
           throw error
         }
       },
@@ -164,17 +164,17 @@ export function GroupPage() {
 
   function confirmLeave() {
     setConfirm({
-      title: `Leave ${data.name}?`,
-      description: "You'll need a new invite link to join again.",
-      confirmLabel: "Leave group",
+      title: t("group.leaveTitle", { name: data.name }),
+      description: t("group.leaveHint"),
+      confirmLabel: t("group.leave"),
       destructive: true,
       onConfirm: async () => {
         try {
           await removeMember.mutateAsync(me.id)
-          toast.success(`You left ${data.name}`)
+          toast.success(t("group.left", { name: data.name }))
           navigate("/", { replace: true })
         } catch (error) {
-          toast.error(formErrorMessage(error) ?? "Couldn't leave the group. Try again.")
+          toast.error(formErrorMessage(error) ?? t("group.leaveFailed"))
           throw error
         }
       },
@@ -191,11 +191,13 @@ export function GroupPage() {
             <h1 className="text-3xl font-extrabold tracking-tight break-words sm:text-4xl">
               {data.name}
             </h1>
-            {archived && <Badge variant="outline">Archived</Badge>}
+            {archived && <Badge variant="outline">{t("group.archivedBadge")}</Badge>}
           </div>
           <p className="text-muted-foreground">
-            {data.memberCount === 1 ? "1 member" : `${data.memberCount} members`}, expenses in{" "}
-            {data.currency}
+            {t("group.summary", {
+              members: t("home.members", { count: data.memberCount }),
+              currency: data.currency,
+            })}
           </p>
         </div>
 
@@ -203,13 +205,13 @@ export function GroupPage() {
           {!archived && (
             <Button size="lg" onClick={() => setAddingExpense(true)}>
               <PlusIcon data-icon="inline-start" />
-              Add expense
+              {t("group.addExpense")}
             </Button>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button variant="outline" size="icon-lg" />}
-              aria-label="Group options"
+              aria-label={t("group.options")}
             >
               <EllipsisIcon />
             </DropdownMenuTrigger>
@@ -218,7 +220,7 @@ export function GroupPage() {
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => setEditing(true)}>
                     <PencilIcon />
-                    Edit group
+                    {t("group.edit")}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               )}
@@ -226,7 +228,7 @@ export function GroupPage() {
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => confirmArchive(!archived)}>
                     {archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
-                    {archived ? "Unarchive group" : "Archive group"}
+                    {t(archived ? "group.unarchive" : "group.archive")}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               )}
@@ -236,7 +238,7 @@ export function GroupPage() {
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={confirmLeave}>
                       <LogOutIcon />
-                      Leave group
+                      {t("group.leave")}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </>
@@ -249,11 +251,9 @@ export function GroupPage() {
       {archived && (
         <Alert>
           <ArchiveIcon />
-          <AlertTitle>This group is archived</AlertTitle>
+          <AlertTitle>{t("group.archivedTitle")}</AlertTitle>
           <AlertDescription>
-            {isOwner
-              ? "It's read-only. Unarchive it from the group options to make changes."
-              : "It's read-only. Only the owner can unarchive it."}
+            {t(isOwner ? "group.archivedOwner" : "group.archivedMember")}
           </AlertDescription>
         </Alert>
       )}
@@ -266,10 +266,10 @@ export function GroupPage() {
         className="gap-4"
       >
         <TabsList>
-          <TabsTrigger value="expenses">Expenses</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
-          <TabsTrigger value="balances">Balances</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="expenses">{t("group.tabs.expenses")}</TabsTrigger>
+          <TabsTrigger value="events">{t("group.tabs.events")}</TabsTrigger>
+          <TabsTrigger value="balances">{t("group.tabs.balances")}</TabsTrigger>
+          <TabsTrigger value="members">{t("group.tabs.members")}</TabsTrigger>
         </TabsList>
         <TabsContent value="expenses">
           <ExpenseList
@@ -280,7 +280,7 @@ export function GroupPage() {
               archived ? undefined : (
                 <Button onClick={() => setAddingExpense(true)}>
                   <PlusIcon data-icon="inline-start" />
-                  Add the first expense
+                  {t("group.addFirstExpense")}
                 </Button>
               )
             }
@@ -290,7 +290,7 @@ export function GroupPage() {
           {!archived && (
             <Button variant="outline" className="self-start" onClick={() => setPlanning(true)}>
               <CalendarPlusIcon data-icon="inline-start" />
-              Plan an event
+              {t("group.planEvent")}
             </Button>
           )}
           <EventList groupId={data.id} />

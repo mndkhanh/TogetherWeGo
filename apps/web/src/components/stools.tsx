@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 /**
@@ -61,13 +62,14 @@ const PALE = "#edefea"
 const DEEP = "#1a2233"
 
 export function StoolScene({ className }: { className?: string }) {
+  const { t } = useTranslation()
   const floor = 190
   return (
     <svg
       viewBox="0 0 440 200"
       className={cn("h-auto w-full", className)}
       role="img"
-      aria-label="Stacks of plastic stools on the sidewalk, one pulled out for you"
+      aria-label={t("scene.stools")}
     >
       <Stack x={0} floor={floor} colors={[RED, RED, PALE, RED, RED, PALE]} />
       <Stack x={134} floor={floor} colors={[PALE, DEEP, PALE, DEEP]} />

@@ -1,6 +1,7 @@
 import { type GroupDetailResponse, updateGroupSchema } from "@twg/shared"
 import * as React from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { type Currency, CurrencyToggle } from "@/components/currency-toggle"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -29,6 +30,7 @@ export function EditGroupDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useTranslation()
   const [currency, setCurrency] = React.useState<Currency>(group.currency)
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [formError, setFormError] = React.useState<string | null>(null)
@@ -52,7 +54,7 @@ export function EditGroupDialog({
     try {
       await update.mutateAsync(data)
       onOpenChange(false)
-      toast.success("Group saved")
+      toast.success(t("editGroup.saved"))
     } catch (error) {
       if (error instanceof ApiError) setFieldErrors(toFieldErrors(error.issues))
       setFormError(formErrorMessage(error))
@@ -64,8 +66,8 @@ export function EditGroupDialog({
       <DialogContent>
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>Edit group</DialogTitle>
-            <DialogDescription>Everyone in the group sees these changes.</DialogDescription>
+            <DialogTitle>{t("editGroup.title")}</DialogTitle>
+            <DialogDescription>{t("editGroup.hint")}</DialogDescription>
           </DialogHeader>
 
           {formError && (
@@ -76,7 +78,7 @@ export function EditGroupDialog({
 
           <FieldGroup>
             <Field data-invalid={!!fieldErrors.name || undefined}>
-              <FieldLabel htmlFor="edit-group-name">Group name</FieldLabel>
+              <FieldLabel htmlFor="edit-group-name">{t("createGroup.name")}</FieldLabel>
               <Input
                 id="edit-group-name"
                 name="name"
@@ -87,16 +89,16 @@ export function EditGroupDialog({
               <FieldError>{fieldErrors.name}</FieldError>
             </Field>
             <Field>
-              <FieldLabel htmlFor="edit-group-currency">Currency</FieldLabel>
+              <FieldLabel htmlFor="edit-group-currency">{t("createGroup.currency")}</FieldLabel>
               <CurrencyToggle id="edit-group-currency" value={currency} onChange={setCurrency} />
-              <FieldDescription>New expenses in this group use this currency.</FieldDescription>
+              <FieldDescription>{t("editGroup.currencyHint")}</FieldDescription>
             </Field>
           </FieldGroup>
 
           <DialogFooter>
             <Button type="submit" disabled={update.isPending}>
               {update.isPending && <Spinner data-icon="inline-start" />}
-              Save changes
+              {t("common.saveChanges")}
             </Button>
           </DialogFooter>
         </form>

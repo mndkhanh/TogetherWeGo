@@ -2,7 +2,9 @@ import { useQueryClient } from "@tanstack/react-query"
 import type { AuthResponse, LoginInput, MeResponse, RegisterInput } from "@twg/shared"
 import * as React from "react"
 
+import { currentLocale, deviceTimeZone, setLocale } from "@/i18n"
 import { api, refreshSession, setAccessToken } from "@/lib/api"
+import { setTimeZone } from "@/lib/time"
 
 type AuthState =
   | { status: "loading"; user: null }
@@ -31,9 +33,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session) {
         setAccessToken(session.accessToken)
         queryClient.setQueryData(meQueryKey, session.user)
+        // The account's language wins over this device's, so the screen matches the emails.
+        setLocale(session.user.locale)
+        setTimeZone(session.user.timeZone)
         setState({ status: "signed-in", user: session.user })
       } else {
         setAccessToken(null)
+        setTimeZone(deviceTimeZone())
         queryClient.clear()
         setState({ status: "signed-out", user: null })
       }
@@ -62,7 +68,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       register: async (input) => {
         applySession(
-          await api<AuthResponse>("/auth/register", { method: "POST", body: JSON.stringify(input) })
+          await api<AuthResponse>("/auth/register", {
+            method: "POST",
+            // A new account starts in the language on screen and this device's time zone.
+            body: JSON.stringify({ locale: currentLocale(), timeZone: deviceTimeZone(), ...input }),
+          })
         )
       },
       logout: async () => {

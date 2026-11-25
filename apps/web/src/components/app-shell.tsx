@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import type { MeResponse } from "@twg/shared"
-import { BanknoteIcon, BellIcon, LogOutIcon } from "lucide-react"
+import { BanknoteIcon, BellIcon, LanguagesIcon, LogOutIcon } from "lucide-react"
 import * as React from "react"
+import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -20,6 +21,7 @@ import { Wordmark } from "@/components/wordmark"
 import { api } from "@/lib/api"
 import { meQueryKey, useAuth } from "@/lib/auth"
 import { initials } from "@/lib/format"
+import { useSetLocale } from "@/lib/locale"
 
 /** The signed-in user. Only used under RequireAuth, so it's always available. */
 export function useMe(): MeResponse {
@@ -36,11 +38,14 @@ export function useMe(): MeResponse {
 function AccountMenu({ user }: { user: MeResponse }) {
   const { logout } = useAuth()
   const navigate = useNavigate()
+  const { t } = useTranslation()
+  const setLocale = useSetLocale()
+  const other = user.locale === "vi" ? "en" : "vi"
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={<Button variant="ghost" size="icon-lg" className="rounded-full" />}
-        aria-label="Account menu"
+        aria-label={t("shell.accountMenu")}
       >
         <Avatar>
           {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
@@ -58,18 +63,23 @@ function AccountMenu({ user }: { user: MeResponse }) {
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={() => void navigate("/settings/payments")}>
             <BanknoteIcon />
-            Getting paid
+            {t("shell.gettingPaid")}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => void navigate("/settings/notifications")}>
             <BellIcon />
-            Notification settings
+            {t("shell.notificationSettings")}
+          </DropdownMenuItem>
+          {/* Each language named in itself, so it's findable whichever one is on screen. */}
+          <DropdownMenuItem onClick={() => void setLocale(other)} lang={other}>
+            <LanguagesIcon />
+            {t(`language.${other}`)}
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={() => void logout()}>
             <LogOutIcon />
-            Sign out
+            {t("shell.signOut")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>

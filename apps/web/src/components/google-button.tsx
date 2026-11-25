@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import type { AuthProvidersResponse } from "@twg/shared"
+import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import { FieldSeparator } from "@/components/ui/field"
+import { currentLocale, deviceTimeZone } from "@/i18n"
 import { api } from "@/lib/api"
 
 function GoogleLogo() {
@@ -27,6 +29,7 @@ function GoogleLogo() {
 
 /** Shown only when the server has Google sign-in configured. */
 export function GoogleSignIn({ label }: { label: string }) {
+  const { t } = useTranslation()
   const providers = useQuery({
     queryKey: ["auth-providers"],
     queryFn: () => api<AuthProvidersResponse>("/auth/providers"),
@@ -37,13 +40,18 @@ export function GoogleSignIn({ label }: { label: string }) {
 
   return (
     <>
-      <FieldSeparator>or</FieldSeparator>
+      <FieldSeparator>{t("auth.or")}</FieldSeparator>
       <Button
         variant="outline"
         size="lg"
         className="w-full"
-        // A full page navigation: the server redirects to Google and back.
-        render={<a href="/v1/auth/google" />}
+        // A full page navigation: the server redirects to Google and back. A new account
+        // starts in the language on screen and this device's time zone.
+        render={
+          <a
+            href={`/v1/auth/google?${new URLSearchParams({ locale: currentLocale(), tz: deviceTimeZone() })}`}
+          />
+        }
         nativeButton={false}
       >
         <GoogleLogo />

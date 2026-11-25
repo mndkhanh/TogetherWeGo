@@ -1,6 +1,7 @@
 import type { UnmatchedTransferResponse } from "@twg/shared"
 import * as React from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,7 @@ function AssignDialog({
   myUserId: string
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const groups = useGroups()
   const [groupId, setGroupId] = React.useState<string | null>(null)
   const [fromUserId, setFromUserId] = React.useState<string | null>(null)
@@ -70,7 +72,7 @@ function AssignDialog({
   async function submit() {
     if (!transfer) return
     if (!groupId || !fromUserId) {
-      setError("Choose the group and who sent it")
+      setError(t("unmatched.chooseBoth"))
       return
     }
     // If they already started a payment to you, this transfer is that payment.
@@ -83,10 +85,10 @@ function AssignDialog({
           ? { id: transfer.id, settlementId: waiting.id }
           : { id: transfer.id, groupId, fromUserId }
       )
-      toast.success(`Recorded ${money(transfer.amount, "VND")} as paid`)
+      toast.success(t("unmatched.recorded", { amount: money(transfer.amount, "VND") }))
       onClose()
     } catch (err) {
-      setError(formErrorMessage(err) ?? "Couldn't record it. Try again.")
+      setError(formErrorMessage(err) ?? t("unmatched.recordFailed"))
     }
   }
 
@@ -94,10 +96,12 @@ function AssignDialog({
     <Dialog open={transfer !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Who sent {transfer ? money(transfer.amount, "VND") : "this"}?</DialogTitle>
-          <DialogDescription>
-            It’s recorded as their payment to you, and their balance in the group goes down.
-          </DialogDescription>
+          <DialogTitle>
+            {t("unmatched.whoSent", {
+              amount: transfer ? money(transfer.amount, "VND") : t("unmatched.this"),
+            })}
+          </DialogTitle>
+          <DialogDescription>{t("unmatched.whoSentHint")}</DialogDescription>
         </DialogHeader>
         {error && (
           <Alert variant="destructive">
@@ -106,7 +110,7 @@ function AssignDialog({
         )}
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor="assign-group">Group</FieldLabel>
+            <FieldLabel htmlFor="assign-group">{t("unmatched.group")}</FieldLabel>
             <Select
               items={groupItems}
               value={groupId}
@@ -117,7 +121,7 @@ function AssignDialog({
               }}
             >
               <SelectTrigger id="assign-group" className="w-full">
-                <SelectValue placeholder="Choose a group" />
+                <SelectValue placeholder={t("unmatched.chooseGroup")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -130,11 +134,11 @@ function AssignDialog({
               </SelectContent>
             </Select>
             {groups.isSuccess && groupItems.length === 0 && (
-              <FieldError>None of your groups use VND.</FieldError>
+              <FieldError>{t("unmatched.noVndGroups")}</FieldError>
             )}
           </Field>
           <Field data-disabled={!groupId || undefined}>
-            <FieldLabel htmlFor="assign-person">Sent by</FieldLabel>
+            <FieldLabel htmlFor="assign-person">{t("unmatched.sentBy")}</FieldLabel>
             <Select
               items={people}
               value={fromUserId}
@@ -145,7 +149,7 @@ function AssignDialog({
               }}
             >
               <SelectTrigger id="assign-person" className="w-full">
-                <SelectValue placeholder="Choose a person" />
+                <SelectValue placeholder={t("unmatched.choosePerson")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -157,15 +161,13 @@ function AssignDialog({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <FieldDescription>
-              If they started a payment to you, this transfer completes it.
-            </FieldDescription>
+            <FieldDescription>{t("unmatched.completesHint")}</FieldDescription>
           </Field>
         </FieldGroup>
         <DialogFooter>
           <Button onClick={() => void submit()} disabled={assign.isPending}>
             {assign.isPending && <Spinner data-icon="inline-start" />}
-            Record payment
+            {t("unmatched.record")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -175,6 +177,7 @@ function AssignDialog({
 
 /** Money SePay saw arrive that didn't carry a payment code we know. */
 export function UnmatchedTransfersCard({ myUserId }: { myUserId: string }) {
+  const { t } = useTranslation()
   const transfers = useUnmatchedTransfers()
   const ignore = useIgnoreTransfer()
   const [assigning, setAssigning] = React.useState<UnmatchedTransferResponse | null>(null)
@@ -184,41 +187,39 @@ export function UnmatchedTransfersCard({ myUserId }: { myUserId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Transfers to sort out</CardTitle>
-        <CardDescription>
-          Money arrived without a payment code we recognise. Say who sent it, or ignore it if it
-          wasn’t for a group.
-        </CardDescription>
+        <CardTitle>{t("unmatched.title")}</CardTitle>
+        <CardDescription>{t("unmatched.hint")}</CardDescription>
       </CardHeader>
       <CardContent>
         <ul className="flex flex-col divide-y">
-          {transfers.data.map((t) => (
-            <li key={t.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+          {transfers.data.map((item) => (
+            <li key={item.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="font-semibold tabular-nums">{money(t.amount, "VND")}</span>
-                <time className="text-sm text-muted-foreground" dateTime={t.receivedAt}>
-                  {formatRelative(t.receivedAt)}
+                <span className="font-semibold tabular-nums">{money(item.amount, "VND")}</span>
+                <time className="text-sm text-muted-foreground" dateTime={item.receivedAt}>
+                  {formatRelative(item.receivedAt)}
                 </time>
               </div>
               <p className="text-sm break-words text-muted-foreground">
-                {t.content || "No message"}
+                {item.content || t("unmatched.noMessage")}
               </p>
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => setAssigning(t)}>
-                  Say who sent it
+                <Button size="sm" onClick={() => setAssigning(item)}>
+                  {t("unmatched.sayWho")}
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   disabled={ignore.isPending}
                   onClick={() =>
-                    ignore.mutate(t.id, {
-                      onSuccess: () => toast.success("Transfer ignored"),
-                      onError: (err) => toast.error(formErrorMessage(err) ?? "Couldn't ignore it"),
+                    ignore.mutate(item.id, {
+                      onSuccess: () => toast.success(t("unmatched.ignored")),
+                      onError: (err) =>
+                        toast.error(formErrorMessage(err) ?? t("unmatched.ignoreFailed")),
                     })
                   }
                 >
-                  Ignore
+                  {t("unmatched.ignore")}
                 </Button>
               </div>
             </li>

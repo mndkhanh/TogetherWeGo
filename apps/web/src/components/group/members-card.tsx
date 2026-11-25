@@ -2,6 +2,7 @@ import { type GroupDetailResponse, type GroupMemberResponse, type GroupRole } fr
 import { CrownIcon, EllipsisIcon, ShieldIcon, UserIcon, UserMinusIcon } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { PersonAvatar } from "@/components/member-avatars"
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import { formErrorMessage } from "@/lib/form-errors"
-import { formatDate, ROLE_LABEL } from "@/lib/format"
+import { formatDate, roleLabel } from "@/lib/format"
 import { useChangeRole, useRemoveMember } from "@/lib/groups"
 
 const RANK: Record<GroupRole, number> = { owner: 3, admin: 2, member: 1 }
@@ -32,6 +33,7 @@ function MemberActions({
   member: GroupMemberResponse
   onConfirm: (request: ConfirmRequest) => void
 }) {
+  const { t } = useTranslation()
   const changeRole = useChangeRole(group.id)
   const removeMember = useRemoveMember(group.id)
   const isOwner = group.myRole === "owner"
@@ -43,9 +45,9 @@ function MemberActions({
   async function setRole(role: GroupRole) {
     try {
       await changeRole.mutateAsync({ userId: member.userId, role })
-      toast.success(`${member.name} is now ${role === "admin" ? "an admin" : `the ${role}`}`)
+      toast.success(t(`members.roleChanged.${role}`, { name: member.name }))
     } catch (error) {
-      toast.error(formErrorMessage(error) ?? "Couldn't change the role. Try again.")
+      toast.error(formErrorMessage(error) ?? t("members.roleFailed"))
       throw error
     }
   }
@@ -54,7 +56,7 @@ function MemberActions({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={<Button variant="ghost" size="icon" />}
-        aria-label={`Actions for ${member.name}`}
+        aria-label={t("members.actionsFor", { name: member.name })}
       >
         <EllipsisIcon />
       </DropdownMenuTrigger>
@@ -64,27 +66,26 @@ function MemberActions({
             {member.role === "member" ? (
               <DropdownMenuItem onClick={() => void setRole("admin").catch(() => {})}>
                 <ShieldIcon />
-                Make admin
+                {t("members.makeAdmin")}
               </DropdownMenuItem>
             ) : (
               <DropdownMenuItem onClick={() => void setRole("member").catch(() => {})}>
                 <UserIcon />
-                Make regular member
+                {t("members.makeMember")}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
               onClick={() =>
                 onConfirm({
-                  title: `Make ${member.name} the owner?`,
-                  description:
-                    "You'll become an admin. The owner can archive the group and change everyone's role, so only do this for someone you trust.",
-                  confirmLabel: `Make ${firstName} owner`,
+                  title: t("members.makeOwnerTitle", { name: member.name }),
+                  description: t("members.makeOwnerHint"),
+                  confirmLabel: t("members.makeOwnerConfirm", { name: firstName }),
                   onConfirm: () => setRole("owner"),
                 })
               }
             >
               <CrownIcon />
-              Make owner
+              {t("members.makeOwner")}
             </DropdownMenuItem>
           </DropdownMenuGroup>
         )}
@@ -95,16 +96,16 @@ function MemberActions({
               variant="destructive"
               onClick={() =>
                 onConfirm({
-                  title: `Remove ${member.name} from ${group.name}?`,
-                  description: "They'll lose access to the group. You can invite them back later.",
-                  confirmLabel: `Remove ${firstName}`,
+                  title: t("members.removeTitle", { name: member.name, group: group.name }),
+                  description: t("members.removeHint"),
+                  confirmLabel: t("members.removeConfirm", { name: firstName }),
                   destructive: true,
                   onConfirm: async () => {
                     try {
                       await removeMember.mutateAsync(member.userId)
-                      toast.success(`Removed ${member.name}`)
+                      toast.success(t("members.removed", { name: member.name }))
                     } catch (error) {
-                      toast.error(formErrorMessage(error) ?? "Couldn't remove them. Try again.")
+                      toast.error(formErrorMessage(error) ?? t("members.removeFailed"))
                       throw error
                     }
                   },
@@ -112,7 +113,7 @@ function MemberActions({
               }
             >
               <UserMinusIcon />
-              Remove from group
+              {t("members.remove")}
             </DropdownMenuItem>
           </DropdownMenuGroup>
         )}
@@ -130,14 +131,15 @@ export function MembersCard({
   myUserId: string
   onConfirm: (request: ConfirmRequest) => void
 }) {
+  const { t } = useTranslation()
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Members</CardTitle>
+        <CardTitle>{t("members.title")}</CardTitle>
         <CardDescription>
           {group.memberCount === 1
-            ? "Only you for now. Share an invite link to add friends."
-            : `${group.memberCount} people`}
+            ? t("members.onlyYou")
+            : t("members.people", { count: group.memberCount })}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col">
@@ -150,16 +152,16 @@ export function MembersCard({
                 <span className="truncate font-medium">
                   {member.name}
                   {member.userId === myUserId && (
-                    <span className="font-normal text-muted-foreground"> (you)</span>
+                    <span className="font-normal text-muted-foreground">{t("members.you")}</span>
                   )}
                 </span>
                 <span className="text-sm text-muted-foreground">
-                  Joined {formatDate(member.joinedAt)}
+                  {t("members.joined", { date: formatDate(member.joinedAt) })}
                 </span>
               </div>
               {member.role !== "member" && (
                 <Badge variant={member.role === "owner" ? "default" : "secondary"}>
-                  {ROLE_LABEL[member.role]}
+                  {roleLabel(member.role)}
                 </Badge>
               )}
               {member.userId !== myUserId && (

@@ -11,6 +11,7 @@ import { CircleCheckIcon, ClockIcon } from "lucide-react"
 import * as React from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { PersonAvatar } from "@/components/member-avatars"
 import { CopyValue } from "@/components/payments/copy-value"
@@ -41,6 +42,7 @@ import {
   useCreateSettlement,
   useSettlement,
 } from "@/lib/payments"
+import { translateMessage } from "@/i18n/messages"
 
 /** A payment someone is about to start, from a suggested transfer. */
 export interface PaymentDraft {
@@ -84,8 +86,10 @@ function AmountInput({
 
 function checkAmount(text: string, currency: Currency): { amount: number } | { error: string } {
   const amount = parseAmount(text, currency)
-  if (amount === null || amount <= 0) return { error: "Enter an amount greater than 0" }
-  if (amount > MAX_AMOUNT[currency]) return { error: "That amount is too large" }
+  if (amount === null || amount <= 0) {
+    return { error: translateMessage("Enter an amount greater than 0") }
+  }
+  if (amount > MAX_AMOUNT[currency]) return { error: translateMessage("That amount is too large") }
   return { amount }
 }
 
@@ -103,6 +107,7 @@ function StartPayment({
   myUserId: string
   onStarted: (settlement: SettlementDetailResponse) => void
 }) {
+  const { t } = useTranslation()
   const [text, setText] = React.useState(formatAmountInput(draft.amount, currency))
   const [error, setError] = React.useState<string | null>(null)
   const create = useCreateSettlement(groupId)
@@ -122,10 +127,15 @@ function StartPayment({
         amount: checked.amount,
       })
       if (!iAmPaying)
-        toast.success(`Recorded ${money(checked.amount, currency)} from ${draft.from.name}`)
+        toast.success(
+          t("payDialog.recordedFrom", {
+            amount: money(checked.amount, currency),
+            name: draft.from.name,
+          })
+        )
       onStarted(settlement)
     } catch (err) {
-      setError(formErrorMessage(err) ?? "Check the amount and try again.")
+      setError(formErrorMessage(err) ?? t("payDialog.checkAmount"))
     }
   }
 
@@ -133,17 +143,19 @@ function StartPayment({
     <form onSubmit={submit} noValidate className="flex flex-col gap-6">
       <DialogHeader>
         <DialogTitle>
-          {iAmPaying ? `Pay ${draft.to.name}` : `${draft.from.name} paid you`}
+          {iAmPaying
+            ? t("payDialog.payName", { name: draft.to.name })
+            : t("payDialog.paidYou", { name: draft.from.name })}
         </DialogTitle>
         <DialogDescription>
           {iAmPaying
-            ? `You owe ${money(draft.amount, currency)}. Pay all of it or part of it.`
-            : "Record money you got outside a bank transfer with a code, like cash. It counts straight away."}
+            ? t("payDialog.youOweHint", { amount: money(draft.amount, currency) })
+            : t("payDialog.recordHint")}
         </DialogDescription>
       </DialogHeader>
       <FieldGroup>
         <Field data-invalid={!!error || undefined}>
-          <FieldLabel htmlFor="payment-amount">Amount</FieldLabel>
+          <FieldLabel htmlFor="payment-amount">{t("payDialog.amount")}</FieldLabel>
           <AmountInput
             id="payment-amount"
             currency={currency}
@@ -160,7 +172,7 @@ function StartPayment({
       <DialogFooter>
         <Button type="submit" disabled={create.isPending}>
           {create.isPending && <Spinner data-icon="inline-start" />}
-          {iAmPaying ? "Show how to pay" : "Record payment"}
+          {iAmPaying ? t("payDialog.showHow") : t("payDialog.recordPayment")}
         </Button>
       </DialogFooter>
     </form>
@@ -174,6 +186,7 @@ function Paid({
   settlement: SettlementDetailResponse
   myUserId: string
 }) {
+  const { t } = useTranslation()
   const paid = settlement.paidAmount ?? settlement.amount
   const iPaid = settlement.from.userId === myUserId
   const short = paid < settlement.amount
@@ -184,12 +197,16 @@ function Paid({
         {money(paid, settlement.currency)}
       </p>
       <p className="text-muted-foreground">
-        {iPaid ? `Paid to ${settlement.to.name}` : `Paid by ${settlement.from.name}`}
-        {settlement.confirmedVia === "sepay" ? ", confirmed by the bank." : "."}
+        {iPaid
+          ? t("payDialog.paidTo", { name: settlement.to.name })
+          : t("payDialog.paidBy", { name: settlement.from.name })}
+        {settlement.confirmedVia === "sepay" ? t("payDialog.confirmedByBank") : "."}
       </p>
       {short && (
         <p className="text-sm text-muted-foreground">
-          {money(settlement.amount - paid, settlement.currency)} of what was asked is still owed.
+          {t("payDialog.stillOwed", {
+            amount: money(settlement.amount - paid, settlement.currency),
+          })}
         </p>
       )}
     </div>
@@ -198,14 +215,12 @@ function Paid({
 
 /** What the payer sees: QR code and bank details, and whether it has arrived. */
 function HowToPay({ settlement }: { settlement: SettlementDetailResponse }) {
+  const { t } = useTranslation()
   const payee = settlement.payee
   if (!payee) {
     return (
       <Alert>
-        <AlertDescription>
-          {settlement.to.name} hasn’t added a bank account yet. Ask them how they’d like to be paid;
-          they’ll mark it as received.
-        </AlertDescription>
+        <AlertDescription>{t("payDialog.noBank", { name: settlement.to.name })}</AlertDescription>
       </Alert>
     )
   }
@@ -215,28 +230,37 @@ function HowToPay({ settlement }: { settlement: SettlementDetailResponse }) {
         <figure className="flex flex-col items-center gap-2">
           <img
             src={payee.qrUrl}
-            alt={`QR code to pay ${money(settlement.amount, settlement.currency)} to ${payee.holderName}`}
+            alt={t("payDialog.qrAlt", {
+              amount: money(settlement.amount, settlement.currency),
+              name: payee.holderName,
+            })}
             referrerPolicy="no-referrer"
             className="size-56 rounded-xl border bg-white p-2"
           />
-          <figcaption className="text-sm text-muted-foreground">
-            Scan with your banking app. The amount and code are filled in.
-          </figcaption>
+          <figcaption className="text-sm text-muted-foreground">{t("payDialog.scan")}</figcaption>
         </figure>
       )}
       <FieldGroup className="gap-4">
         <Field>
-          <FieldLabel htmlFor="pay-code">Transfer message</FieldLabel>
-          <CopyValue id="pay-code" value={settlement.paymentCode} label="Payment code" mono />
-          <FieldDescription>
-            Put this code in the message, exactly as it is, so the payment is matched to you.
-          </FieldDescription>
+          <FieldLabel htmlFor="pay-code">{t("payDialog.transferMessage")}</FieldLabel>
+          <CopyValue
+            id="pay-code"
+            value={settlement.paymentCode}
+            label={t("payDialog.paymentCode")}
+            mono
+          />
+          <FieldDescription>{t("payDialog.codeHint")}</FieldDescription>
         </Field>
         <Field>
           <FieldLabel htmlFor="pay-account">
             {payee.bankName} · {payee.holderName}
           </FieldLabel>
-          <CopyValue id="pay-account" value={payee.accountNumber} label="Account number" mono />
+          <CopyValue
+            id="pay-account"
+            value={payee.accountNumber}
+            label={t("payDialog.accountNumber")}
+            mono
+          />
         </Field>
       </FieldGroup>
     </div>
@@ -250,14 +274,15 @@ function PendingStatus({
   settlement: SettlementDetailResponse
   myUserId: string
 }) {
+  const { t } = useTranslation()
   const iAmPaying = settlement.from.userId === myUserId
   const text = iAmPaying
     ? settlement.autoConfirm
-      ? "This updates by itself a few seconds after the money arrives."
-      : `${settlement.to.name} will mark it as received.`
+      ? t("payDialog.autoUpdates")
+      : t("payDialog.willMark", { name: settlement.to.name })
     : settlement.autoConfirm
-      ? "SePay confirms it when the money arrives. You can also mark it yourself."
-      : "Check your bank, then mark it as received."
+      ? t("payDialog.sepayConfirms")
+      : t("payDialog.checkBank")
   return (
     <p className="flex items-start gap-2 text-sm text-muted-foreground" role="status">
       <ClockIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -274,6 +299,7 @@ function ConfirmReceived({
   settlement: SettlementDetailResponse
   onDone: () => void
 }) {
+  const { t } = useTranslation()
   const [text, setText] = React.useState(formatAmountInput(settlement.amount, settlement.currency))
   const [error, setError] = React.useState<string | null>(null)
   const confirm = useConfirmSettlement(settlement.groupId)
@@ -287,26 +313,26 @@ function ConfirmReceived({
     }
     try {
       await confirm.mutateAsync({ id: settlement.id, amount: checked.amount })
-      toast.success("Marked as received")
+      toast.success(t("payDialog.markedReceived"))
     } catch (err) {
-      setError(formErrorMessage(err) ?? "Couldn't confirm it. Try again.")
+      setError(formErrorMessage(err) ?? t("payDialog.confirmFailed"))
     }
   }
 
   async function onCancel() {
     try {
       await cancel.mutateAsync(settlement.id)
-      toast.success("Payment cancelled")
+      toast.success(t("payDialog.cancelled"))
       onDone()
     } catch (err) {
-      setError(formErrorMessage(err) ?? "Couldn't cancel it. Try again.")
+      setError(formErrorMessage(err) ?? t("payDialog.cancelFailed"))
     }
   }
 
   return (
     <div className="flex flex-col gap-5">
       <Field data-invalid={!!error || undefined}>
-        <FieldLabel htmlFor="received-amount">Amount that arrived</FieldLabel>
+        <FieldLabel htmlFor="received-amount">{t("payDialog.arrivedAmount")}</FieldLabel>
         <AmountInput
           id="received-amount"
           currency={settlement.currency}
@@ -321,11 +347,11 @@ function ConfirmReceived({
       </Field>
       <DialogFooter>
         <Button variant="ghost" onClick={() => void onCancel()} disabled={cancel.isPending}>
-          It didn’t arrive
+          {t("payDialog.didntArrive")}
         </Button>
         <Button onClick={() => void onConfirm()} disabled={confirm.isPending}>
           {confirm.isPending && <Spinner data-icon="inline-start" />}
-          Mark as received
+          {t("payDialog.markReceived")}
         </Button>
       </DialogFooter>
     </div>
@@ -341,6 +367,7 @@ function ShowPayment({
   myUserId: string
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const query = useSettlement(settlementId)
   const settlement = query.data
   const groupId = settlement?.groupId ?? ""
@@ -351,15 +378,15 @@ function ShowPayment({
   React.useEffect(() => {
     const paying = settlement?.from.userId === myUserId
     if (paying && lastStatus.current === "pending" && settlement?.status === "confirmed") {
-      toast.success(`Payment to ${settlement.to.name} confirmed`)
+      toast.success(t("payDialog.confirmedTo", { name: settlement.to.name }))
     }
     lastStatus.current = settlement?.status
-  }, [settlement?.status, settlement?.to.name, settlement?.from.userId, myUserId])
+  }, [settlement?.status, settlement?.to.name, settlement?.from.userId, myUserId, t])
 
   if (query.isPending) {
     return (
       <div className="flex flex-col gap-3">
-        <DialogTitle className="sr-only">Payment</DialogTitle>
+        <DialogTitle className="sr-only">{t("payDialog.payment")}</DialogTitle>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-56" />
       </div>
@@ -368,10 +395,10 @@ function ShowPayment({
   if (!settlement) {
     return (
       <>
-        <DialogTitle>Payment</DialogTitle>
+        <DialogTitle>{t("payDialog.payment")}</DialogTitle>
         <Alert variant="destructive">
           <AlertDescription>
-            {formErrorMessage(query.error) ?? "Couldn't load this payment."}
+            {formErrorMessage(query.error) ?? t("payDialog.loadFailed")}
           </AlertDescription>
         </Alert>
       </>
@@ -381,9 +408,9 @@ function ShowPayment({
   const iAmPaying = settlement.from.userId === myUserId
   const iAmPaid = settlement.to.userId === myUserId
   const title = iAmPaying
-    ? `Pay ${settlement.to.name}`
+    ? t("payDialog.payName", { name: settlement.to.name })
     : iAmPaid
-      ? `From ${settlement.from.name}`
+      ? t("payDialog.from", { name: settlement.from.name })
       : `${settlement.from.name} → ${settlement.to.name}`
 
   return (
@@ -395,10 +422,10 @@ function ShowPayment({
         </DialogTitle>
         <DialogDescription>
           {settlement.status === "pending"
-            ? `${money(settlement.amount, settlement.currency)}${settlement.stale ? " · started over a week ago" : ""}`
+            ? `${money(settlement.amount, settlement.currency)}${settlement.stale ? t("payDialog.stale") : ""}`
             : settlement.status === "cancelled"
-              ? "This payment was cancelled."
-              : "Done."}
+              ? t("payDialog.wasCancelled")
+              : t("payDialog.done")}
         </DialogDescription>
       </DialogHeader>
 
@@ -410,12 +437,12 @@ function ShowPayment({
           {(iAmPaying || iAmPaid) && <PendingStatus settlement={settlement} myUserId={myUserId} />}
           {iAmPaid && !settlement.autoConfirm && settlement.currency === "VND" && (
             <p className="text-sm text-muted-foreground">
-              Want payments to confirm themselves?{" "}
+              {t("payDialog.wantAuto")}{" "}
               <Link
                 to="/settings/payments"
                 className="font-medium text-primary underline-offset-4 hover:underline"
               >
-                Set up SePay
+                {t("payDialog.setUpSepay")}
               </Link>
               .
             </p>
@@ -429,16 +456,17 @@ function ShowPayment({
                 onClick={() =>
                   cancel.mutate(settlement.id, {
                     onSuccess: () => {
-                      toast.success("Payment cancelled")
+                      toast.success(t("payDialog.cancelled"))
                       onClose()
                     },
-                    onError: (err) => toast.error(formErrorMessage(err) ?? "Couldn't cancel it"),
+                    onError: (err) =>
+                      toast.error(formErrorMessage(err) ?? t("payDialog.cancelFailedShort")),
                   })
                 }
               >
-                Cancel payment
+                {t("payDialog.cancelPayment")}
               </Button>
-              <Button onClick={onClose}>I’ve sent it</Button>
+              <Button onClick={onClose}>{t("payDialog.sentIt")}</Button>
             </DialogFooter>
           )}
         </>

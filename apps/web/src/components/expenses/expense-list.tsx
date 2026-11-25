@@ -1,6 +1,8 @@
 import type { ExpenseResponse } from "@twg/shared"
 import { PaperclipIcon, ReceiptTextIcon } from "lucide-react"
 import * as React from "react"
+import type { TFunction } from "i18next"
+import { useTranslation } from "react-i18next"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -14,34 +16,40 @@ import {
 } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { currentLocale } from "@/i18n"
 import { money, useExpenses } from "@/lib/expenses"
 import { cn } from "@/lib/utils"
 
-const dayFormat = new Intl.DateTimeFormat("en", {
-  weekday: "short",
-  day: "numeric",
-  month: "short",
-})
-
 function dayLabel(isoDate: string): string {
-  return dayFormat.format(new Date(`${isoDate}T00:00:00`))
+  return new Intl.DateTimeFormat(currentLocale(), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${isoDate}T00:00:00`))
 }
 
 /** What this expense means for the current user, in one short phrase. */
-function myPart(expense: ExpenseResponse, myUserId: string): { text: string; tone: string } {
+function myPart(
+  expense: ExpenseResponse,
+  myUserId: string,
+  t: TFunction
+): { text: string; tone: string } {
   const involved =
     expense.payer.userId === myUserId || expense.splits.some((s) => s.userId === myUserId)
-  if (!involved) return { text: "Not involved", tone: "text-muted-foreground" }
+  if (!involved) return { text: t("expenses.notInvolved"), tone: "text-muted-foreground" }
   if (expense.myNet > 0) {
-    return { text: `You lent ${money(expense.myNet, expense.currency)}`, tone: "text-primary" }
+    return {
+      text: t("expenses.youLent", { amount: money(expense.myNet, expense.currency) }),
+      tone: "text-primary",
+    }
   }
   if (expense.myNet < 0) {
     return {
-      text: `You owe ${money(-expense.myNet, expense.currency)}`,
+      text: t("expenses.youOwe", { amount: money(-expense.myNet, expense.currency) }),
       tone: "text-destructive",
     }
   }
-  return { text: "Your share is paid", tone: "text-muted-foreground" }
+  return { text: t("expenses.sharePaid"), tone: "text-muted-foreground" }
 }
 
 function ExpenseRow({
@@ -53,8 +61,9 @@ function ExpenseRow({
   myUserId: string
   onOpen: (id: string) => void
 }) {
-  const part = myPart(expense, myUserId)
-  const payer = expense.payer.userId === myUserId ? "You" : expense.payer.name
+  const { t } = useTranslation()
+  const part = myPart(expense, myUserId, t)
+  const payer = expense.payer.userId === myUserId ? t("common.you") : expense.payer.name
   return (
     <li>
       <button
@@ -68,12 +77,12 @@ function ExpenseRow({
             {expense.hasReceipt && (
               <PaperclipIcon
                 className="size-3.5 shrink-0 text-muted-foreground"
-                aria-label="Has a receipt"
+                aria-label={t("expenses.hasReceipt")}
               />
             )}
           </span>
           <span className="truncate text-sm text-muted-foreground">
-            {payer} paid {money(expense.amount, expense.currency)}
+            {t("expenses.paid", { payer, amount: money(expense.amount, expense.currency) })}
             {expense.event && ` · ${expense.event.title}`}
           </span>
         </div>
@@ -97,11 +106,12 @@ export function ExpenseList({
   /** Shown in the empty state; omitted when the group is archived. */
   addButton?: React.ReactNode
 }) {
+  const { t } = useTranslation()
   const expenses = useExpenses(groupId)
 
   if (expenses.isPending) {
     return (
-      <div className="flex flex-col gap-3" aria-label="Loading expenses">
+      <div className="flex flex-col gap-3" aria-label={t("expenses.loading")}>
         <Skeleton className="h-14" />
         <Skeleton className="h-14" />
         <Skeleton className="h-14" />
@@ -113,9 +123,9 @@ export function ExpenseList({
     return (
       <Alert variant="destructive">
         <AlertDescription className="flex items-center justify-between gap-4">
-          Couldn't load the expenses.
+          {t("expenses.loadFailed")}
           <Button variant="outline" size="sm" onClick={() => void expenses.refetch()}>
-            Try again
+            {t("common.tryAgain")}
           </Button>
         </AlertDescription>
       </Alert>
@@ -130,10 +140,8 @@ export function ExpenseList({
           <EmptyMedia variant="icon">
             <ReceiptTextIcon />
           </EmptyMedia>
-          <EmptyTitle>No expenses yet</EmptyTitle>
-          <EmptyDescription>
-            Add what someone paid for the group, and TogetherWeGo works out who owes whom.
-          </EmptyDescription>
+          <EmptyTitle>{t("expenses.none")}</EmptyTitle>
+          <EmptyDescription>{t("expenses.noneHint")}</EmptyDescription>
         </EmptyHeader>
         {addButton && <EmptyContent>{addButton}</EmptyContent>}
       </Empty>
@@ -167,7 +175,7 @@ export function ExpenseList({
           onClick={() => void expenses.fetchNextPage()}
         >
           {expenses.isFetchingNextPage && <Spinner data-icon="inline-start" />}
-          Show older expenses
+          {t("expenses.showOlder")}
         </Button>
       )}
     </div>

@@ -16,10 +16,13 @@ import { Throttle } from '@nestjs/throttler';
 import {
   type AuthProvidersResponse,
   type AuthResponse,
+  type Locale,
+  localeSchema,
   type LoginInput,
   loginSchema,
   type RegisterInput,
   registerSchema,
+  timeZoneSchema,
 } from '@twg/shared';
 import type { Request, Response } from 'express';
 import { Public } from '../common/public.decorator.js';
@@ -107,12 +110,25 @@ export class AuthController {
     return { password: true, google: this.google.enabled };
   }
 
+  /**
+   * `locale` and `tz` (optional) are the web app's language and the device's time zone, kept
+   * in the state cookie and used only if this sign-in creates the account. Anything invalid is
+   * dropped, never an error.
+   */
   @Get('google')
-  async googleStart(@Res() res: Response): Promise<void> {
+  async googleStart(
+    @Query('locale') locale: string | undefined,
+    @Query('tz') tz: string | undefined,
+    @Res() res: Response,
+  ): Promise<void> {
     const { url, state, codeVerifier } = await this.google.start();
+    const prefs = {
+      ...(localeSchema.safeParse(locale).success && { locale }),
+      ...(timeZoneSchema.safeParse(tz).success && { timeZone: tz }),
+    };
     res.cookie(
       OAUTH_STATE_COOKIE,
-      JSON.stringify({ state, codeVerifier }),
+      JSON.stringify({ state, codeVerifier, ...prefs }),
       oauthStateCookieOptions(this.config.cookieSecure),
     );
     res.redirect(url);
@@ -139,7 +155,10 @@ export class AuthController {
 
     try {
       const profile = await this.google.finish(code, saved.codeVerifier);
-      const refresh = await this.auth.signInWithGoogle(profile, req.get('user-agent'));
+      const refresh = await this.auth.signInWithGoogle(profile, req.get('user-agent'), {
+        locale: saved.locale,
+        timeZone: saved.timeZone,
+      });
       res.cookie(
         REFRESH_COOKIE,
         refresh.token,
@@ -171,13 +190,23 @@ export class AuthController {
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 
-  private readOAuthState(req: Request): { state: string; codeVerifier: string } | undefined {
+  private readOAuthState(
+    req: Request,
+  ): { state: string; codeVerifier: string; locale?: Locale; timeZone?: string } | undefined {
     const raw: unknown = req.cookies?.[OAUTH_STATE_COOKIE];
     if (typeof raw !== 'string') return undefined;
     try {
-      const parsed = JSON.parse(raw) as { state?: unknown; codeVerifier?: unknown };
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      // The cookie is httpOnly but still client-side: validate the prefs again.
+      const locale = localeSchema.safeParse(parsed.locale);
+      const timeZone = timeZoneSchema.safeParse(parsed.timeZone);
       return typeof parsed.state === 'string' && typeof parsed.codeVerifier === 'string'
-        ? { state: parsed.state, codeVerifier: parsed.codeVerifier }
+        ? {
+            state: parsed.state,
+            codeVerifier: parsed.codeVerifier,
+            ...(locale.success && { locale: locale.data }),
+            ...(timeZone.success && { timeZone: timeZone.data }),
+          }
         : undefined;
     } catch {
       return undefined;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type Locale, localeSchema, timeZoneSchema } from '../i18n/locale.js';
 
 // Messages are shown to users as-is in the web forms, so they are written as instructions.
 
@@ -25,6 +26,9 @@ export const registerSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   name: nameSchema,
+  /** The language and time zone the person signed up in; defaults if left out. */
+  locale: localeSchema.optional(),
+  timeZone: timeZoneSchema.optional(),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
@@ -41,6 +45,8 @@ export const updateMeSchema = z
   .object({
     name: nameSchema,
     defaultCurrency: z.enum(['VND', 'USD'], { error: 'Choose VND or USD' }),
+    locale: localeSchema,
+    timeZone: timeZoneSchema,
   })
   .partial();
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
@@ -52,6 +58,8 @@ export interface MeResponse {
   name: string;
   avatarUrl: string | null;
   defaultCurrency: 'VND' | 'USD';
+  locale: Locale;
+  timeZone: string;
   hasPassword: boolean;
   googleLinked: boolean;
   createdAt: string;

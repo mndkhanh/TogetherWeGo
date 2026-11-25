@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_TIME_ZONE, type Locale, type LocaleOptions } from '../i18n/locale.js';
 import { type Currency, formatMoney } from '../money/money.js';
 import type { PersonRef } from './expenses.js';
 
@@ -197,100 +198,154 @@ function money(amount: number | undefined, currency: Currency | undefined): stri
 }
 
 /** "An 150.000 ₫", or "150.000 ₫ to An and Bình", or "… to An, Bình and 2 others". */
-function owedTo(amount: string, names: string[] = []): string {
+function owedTo(locale: Locale, amount: string, names: string[] = []): string {
+  const [to, and, others] = locale === 'vi' ? ['cho', 'và', 'người khác'] : ['to', 'and', 'others'];
   if (names.length === 1) return `${names[0]} ${amount}`;
   if (names.length === 0) return amount;
-  if (names.length <= 3) return `${amount} to ${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `${amount} to ${names.slice(0, 2).join(', ')} and ${names.length - 2} others`;
+  if (names.length <= 3) {
+    return `${amount} ${to} ${names.slice(0, -1).join(', ')} ${and} ${names.at(-1)}`;
+  }
+  return `${amount} ${to} ${names.slice(0, 2).join(', ')} ${and} ${names.length - 2} ${others}`;
 }
 
-const whenFormat = new Intl.DateTimeFormat('en', {
-  weekday: 'short',
-  day: 'numeric',
-  month: 'short',
-  hour: 'numeric',
-  minute: '2-digit',
-  timeZone: 'Asia/Ho_Chi_Minh',
-});
+function formatWhen(iso: string, { locale = 'en', timeZone }: LocaleOptions): string {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: timeZone ?? DEFAULT_TIME_ZONE,
+  }).format(new Date(iso));
+}
 
 /**
- * The sentence and the in-app link for a notification. Pure text: callers escape it for HTML.
- * Times are shown in Vietnam time, since that's where the groups meet (per-user time zones
- * come with Phase 7).
+ * The sentence and the in-app link for a notification, in the reader's language, with times in
+ * their time zone (Vietnam time if they haven't set one). Pure text: callers escape it for HTML.
+ * Amounts keep their currency's own format whatever the language (150.000 ₫, $12.50).
  */
 export function describeNotification(
   type: NotificationType,
   data: NotificationData,
+  options: LocaleOptions = {},
 ): { text: string; link: string } {
-  const who = data.actorName ?? 'Someone';
+  const locale = options.locale ?? 'en';
+  const vi = locale === 'vi';
+  const who = data.actorName ?? (vi ? 'Ai đó' : 'Someone');
   const group = data.groupId ? `/groups/${data.groupId}` : '/';
   const amount = money(data.amount, data.currency);
-  const share =
-    data.yourShare !== undefined && data.yourShare > 0
-      ? ` Your share: ${money(data.yourShare, data.currency)}.`
-      : '';
-  const when = data.startsAt ? whenFormat.format(new Date(data.startsAt)) : '';
+  const yours =
+    data.yourShare !== undefined && data.yourShare > 0 ? money(data.yourShare, data.currency) : '';
+  const share = yours ? (vi ? ` Phần của bạn: ${yours}.` : ` Your share: ${yours}.`) : '';
+  const when = data.startsAt ? formatWhen(data.startsAt, options) : '';
   const event = data.eventId ? `${group}/events/${data.eventId}` : group;
   const balances = `${group}?tab=balances`;
+  const g = data.groupName;
+  const at = data.location ? (vi ? ` tại ${data.location}` : ` at ${data.location}`) : '';
+  const owed = owedTo(locale, amount, data.creditorNames);
 
   switch (type) {
     case 'expense.added':
       return {
-        text: `${who} added ${data.title} (${amount}) in ${data.groupName}.${share}`,
+        text: vi
+          ? `${who} đã thêm ${data.title} (${amount}) trong ${g}.${share}`
+          : `${who} added ${data.title} (${amount}) in ${g}.${share}`,
         link: group,
       };
     case 'expense.updated':
       return {
-        text: `${who} edited ${data.title} (${amount}) in ${data.groupName}.${share}`,
+        text: vi
+          ? `${who} đã sửa ${data.title} (${amount}) trong ${g}.${share}`
+          : `${who} edited ${data.title} (${amount}) in ${g}.${share}`,
         link: group,
       };
     case 'expense.deleted':
       return {
-        text: `${who} deleted ${data.title} (${amount}) in ${data.groupName}.`,
+        text: vi
+          ? `${who} đã xoá ${data.title} (${amount}) trong ${g}.`
+          : `${who} deleted ${data.title} (${amount}) in ${g}.`,
         link: group,
       };
     case 'event.created':
       return {
-        text: `${who} planned ${data.title} for ${when} in ${data.groupName}.`,
+        text: vi
+          ? `${who} đã lên lịch ${data.title} vào ${when} trong ${g}.`
+          : `${who} planned ${data.title} for ${when} in ${g}.`,
         link: event,
       };
     case 'event.updated':
-      return { text: `${data.title} in ${data.groupName} moved to ${when}.`, link: event };
-    case 'event.cancelled':
-      return { text: `${who} cancelled ${data.title} in ${data.groupName}.`, link: event };
-    case 'event.commented':
-      return { text: `${who} on ${data.title}: “${data.excerpt}”`, link: event };
-    case 'settlement.requested':
-      return { text: `${who} is paying you ${amount} (${data.groupName}).`, link: balances };
-    case 'settlement.confirmed':
       return {
-        // Sent to the payer; the actor is the person who was paid.
-        text:
-          data.via === 'sepay'
-            ? `${who}’s bank confirmed your payment of ${amount} (${data.groupName}).`
-            : `${who} confirmed your payment of ${amount} (${data.groupName}).`,
+        text: vi
+          ? `${data.title} trong ${g} đã dời sang ${when}.`
+          : `${data.title} in ${g} moved to ${when}.`,
+        link: event,
+      };
+    case 'event.cancelled':
+      return {
+        text: vi
+          ? `${who} đã huỷ ${data.title} trong ${g}.`
+          : `${who} cancelled ${data.title} in ${g}.`,
+        link: event,
+      };
+    case 'event.commented':
+      return {
+        text: vi
+          ? `${who} bình luận ở ${data.title}: “${data.excerpt}”`
+          : `${who} on ${data.title}: “${data.excerpt}”`,
+        link: event,
+      };
+    case 'settlement.requested':
+      return {
+        text: vi
+          ? `${who} đang trả bạn ${amount} (${g}).`
+          : `${who} is paying you ${amount} (${g}).`,
+        link: balances,
+      };
+    case 'settlement.confirmed':
+      // Sent to the payer; the actor is the person who was paid.
+      if (data.via === 'sepay') {
+        return {
+          text: vi
+            ? `Ngân hàng của ${who} đã xác nhận khoản ${amount} bạn trả (${g}).`
+            : `${who}’s bank confirmed your payment of ${amount} (${g}).`,
+          link: balances,
+        };
+      }
+      return {
+        text: vi
+          ? `${who} đã xác nhận khoản ${amount} bạn trả (${g}).`
+          : `${who} confirmed your payment of ${amount} (${g}).`,
         link: balances,
       };
     case 'settlement.cancelled':
       return {
-        text: `${who} cancelled a payment of ${amount} (${data.groupName}).`,
+        text: vi
+          ? `${who} đã huỷ một khoản thanh toán ${amount} (${g}).`
+          : `${who} cancelled a payment of ${amount} (${g}).`,
         link: balances,
       };
     case 'transfer.unmatched':
       return {
-        text: `${amount} arrived without a payment code. Say who sent it.`,
+        text: vi
+          ? `Có ${amount} chuyển đến mà không kèm mã thanh toán. Hãy cho biết ai đã gửi.`
+          : `${amount} arrived without a payment code. Say who sent it.`,
         link: '/settings/payments',
       };
     case 'group.member_joined':
-      return { text: `${who} joined ${data.groupName}.`, link: `${group}?tab=members` };
+      return {
+        text: vi ? `${who} đã tham gia ${g}.` : `${who} joined ${g}.`,
+        link: `${group}?tab=members`,
+      };
     case 'event.reminder':
       return {
-        text: `Coming up: ${data.title} in ${data.groupName}, ${when}${data.location ? ` at ${data.location}` : ''}.`,
+        text: vi
+          ? `Sắp diễn ra: ${data.title} trong ${g}, ${when}${at}.`
+          : `Coming up: ${data.title} in ${g}, ${when}${at}.`,
         link: event,
       };
     case 'debt.reminder':
       return {
-        text: `You owe ${owedTo(amount, data.creditorNames)} in ${data.groupName}.`,
+        text: vi ? `Bạn còn nợ ${owed} trong ${g}.` : `You owe ${owed} in ${g}.`,
         link: balances,
       };
   }

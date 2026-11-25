@@ -1,5 +1,6 @@
 import { ArrowLeftIcon, BellIcon } from "lucide-react"
 import { Link } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { AppShell } from "@/components/app-shell"
 import { NotificationList } from "@/components/notifications/notification-list"
@@ -12,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { unreadCountOf, useMarkAllRead, useNotifications } from "@/lib/notifications"
 
 export function NotificationsPage() {
+  const { t } = useTranslation()
   const feed = useNotifications()
   const markAll = useMarkAllRead()
   const items = feed.data?.pages.flatMap((p) => p.items) ?? []
@@ -28,10 +30,12 @@ export function NotificationsPage() {
           render={<Link to="/" />}
         >
           <ArrowLeftIcon data-icon="inline-start" />
-          Your groups
+          {t("common.yourGroups")}
         </Button>
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Notifications</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
+            {t("notifications.title")}
+          </h1>
           <div className="flex gap-2">
             {unread > 0 && (
               <Button
@@ -39,7 +43,7 @@ export function NotificationsPage() {
                 disabled={markAll.isPending}
                 onClick={() => markAll.mutate(undefined)}
               >
-                Mark all read
+                {t("notifications.markAllRead")}
               </Button>
             )}
             <Button
@@ -47,7 +51,7 @@ export function NotificationsPage() {
               nativeButton={false}
               render={<Link to="/settings/notifications" />}
             >
-              Settings
+              {t("notifications.settings")}
             </Button>
           </div>
         </div>
@@ -58,9 +62,9 @@ export function NotificationsPage() {
       ) : feed.isError ? (
         <Alert variant="destructive">
           <AlertDescription className="flex items-center justify-between gap-4">
-            Couldn't load your notifications.
+            {t("notifications.loadFailed")}
             <Button variant="outline" size="sm" onClick={() => void feed.refetch()}>
-              Try again
+              {t("common.tryAgain")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -70,11 +74,8 @@ export function NotificationsPage() {
             <EmptyMedia variant="icon">
               <BellIcon />
             </EmptyMedia>
-            <EmptyTitle>No notifications yet</EmptyTitle>
-            <EmptyDescription>
-              You’ll hear about new expenses you’re part of, events in your groups, payments, and
-              reminders before events you’re going to.
-            </EmptyDescription>
+            <EmptyTitle>{t("notifications.none")}</EmptyTitle>
+            <EmptyDescription>{t("notifications.noneHint")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
@@ -89,7 +90,7 @@ export function NotificationsPage() {
                 onClick={() => void feed.fetchNextPage()}
               >
                 {feed.isFetchingNextPage && <Spinner data-icon="inline-start" />}
-                Show older
+                {t("common.showOlder")}
               </Button>
             )}
           </CardContent>

@@ -1,6 +1,7 @@
 import { loginSchema } from "@twg/shared"
 import * as React from "react"
 import { Link, useSearchParams } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { AuthLayout } from "@/components/auth-layout"
 import { GoogleSignIn } from "@/components/google-button"
@@ -13,19 +14,21 @@ import { useAuth } from "@/lib/auth"
 import { ApiError } from "@/lib/api"
 import { type FieldErrors, formErrorMessage, toFieldErrors, validate } from "@/lib/form-errors"
 
-const REDIRECT_ERRORS: Record<string, string> = {
-  account_exists: "This email already has a password account. Sign in with your password instead.",
-  google_state: "Google sign-in didn't finish. Try again.",
-  google_failed: "Google sign-in didn't finish. Try again.",
-}
+const REDIRECT_ERRORS = {
+  account_exists: "auth.accountExists",
+  google_state: "auth.googleFailed",
+  google_failed: "auth.googleFailed",
+} as const
 
 export function LoginPage() {
+  const { t } = useTranslation()
   const { login } = useAuth()
   const [params] = useSearchParams()
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
-  const [formError, setFormError] = React.useState<string | null>(
-    REDIRECT_ERRORS[params.get("error") ?? ""] ?? null
-  )
+  const [formError, setFormError] = React.useState<string | null>(() => {
+    const reason = params.get("error") as keyof typeof REDIRECT_ERRORS | null
+    return reason && reason in REDIRECT_ERRORS ? t(REDIRECT_ERRORS[reason]) : null
+  })
   const [pending, setPending] = React.useState(false)
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -52,14 +55,14 @@ export function LoginPage() {
     <AuthLayout>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-bold tracking-tight">Sign in</h2>
+          <h2 className="text-2xl font-bold tracking-tight">{t("auth.signIn")}</h2>
           <p className="text-muted-foreground">
-            New here?{" "}
+            {t("auth.newHere")}{" "}
             <Link
               to="/register"
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              Create an account
+              {t("auth.createAnAccount")}
             </Link>
           </p>
         </div>
@@ -73,7 +76,7 @@ export function LoginPage() {
         <form onSubmit={onSubmit} noValidate>
           <FieldGroup>
             <Field data-invalid={!!fieldErrors.email || undefined}>
-              <FieldLabel htmlFor="email">Email</FieldLabel>
+              <FieldLabel htmlFor="email">{t("auth.email")}</FieldLabel>
               <Input
                 id="email"
                 name="email"
@@ -85,7 +88,7 @@ export function LoginPage() {
               <FieldError>{fieldErrors.email}</FieldError>
             </Field>
             <Field data-invalid={!!fieldErrors.password || undefined}>
-              <FieldLabel htmlFor="password">Password</FieldLabel>
+              <FieldLabel htmlFor="password">{t("auth.password")}</FieldLabel>
               <Input
                 id="password"
                 name="password"
@@ -97,9 +100,9 @@ export function LoginPage() {
             </Field>
             <Button type="submit" size="lg" className="w-full" disabled={pending}>
               {pending && <Spinner data-icon="inline-start" />}
-              Sign in
+              {t("auth.signIn")}
             </Button>
-            <GoogleSignIn label="Sign in with Google" />
+            <GoogleSignIn label={t("auth.signInWithGoogle")} />
           </FieldGroup>
         </form>
       </div>

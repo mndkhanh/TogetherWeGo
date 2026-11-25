@@ -358,3 +358,13 @@ output "ecr_repository_arn" {
 output "region" {
   value = data.aws_region.current.region
 }
+
+output "alb_arn_suffix" {
+  description = "For CloudWatch alarm dimensions"
+  value       = aws_lb.this.arn_suffix
+}
+
+output "api_target_group_arn_suffix" {
+  description = "For CloudWatch alarm dimensions"
+  value       = aws_lb_target_group.api.arn_suffix
+}

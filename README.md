@@ -38,6 +38,7 @@ Host ports can be changed if they clash with other projects: `TWG_POSTGRES_PORT=
 
 ```bash
 pnpm format:check && pnpm lint && pnpm typecheck && pnpm test
+pnpm --filter @twg/web check:i18n       # Vietnamese has every English string, same placeholders
 pnpm --filter @twg/server test:e2e     # needs `pnpm db:up` and migrations
 ```
 
@@ -65,6 +66,13 @@ One-time setup:
 4. Push to `main`. CI runs; when it passes, **Deploy dev** builds the arm64 image, runs migrations as a one-off
    ECS task, rolls out the services (automatic rollback on failed health checks), uploads the SPA and smoke-tests
    `/v1/health`.
+
+5. **Alarms** — set `alarm_emails` in `terraform.tfvars` and confirm the SNS subscription email. Set
+   `enable_waf = true` to put WAF in front of CloudFront in dev too (it's always on in prod).
+
+**Production** (`infra/envs/prod`) uses the same modules with Multi-AZ Postgres, a Valkey replica, two of
+everything, WAF and alarms. Apply it the same way with its own state key; it assumes dev already created the
+GitHub OIDC provider in the account.
 
 Useful commands:
 

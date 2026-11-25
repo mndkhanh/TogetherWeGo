@@ -9,6 +9,8 @@ import type {
   UpdateEventInput,
 } from "@twg/shared"
 
+import { currentLocale } from "@/i18n"
+import { currentTimeZone, fromZoned, isoDateIn, isoTimeIn } from "@/lib/time"
 import { api } from "@/lib/api"
 
 export const eventKeys = {
@@ -125,38 +127,52 @@ export function useDeleteComment(eventId: string) {
 
 // ---------- Dates ----------
 
-const dayFormat = new Intl.DateTimeFormat("en", {
-  weekday: "short",
-  day: "numeric",
-  month: "short",
-})
-const timeFormat = new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" })
-
-/** "Sat 24 Dec · 7:00 PM – 10:00 PM", or with both dates when it runs over several days. */
+/**
+ * "Sat 24 Dec · 7:00 PM – 10:00 PM" (or "T7, 24 thg 12 · 19:00 – 22:00"), with both dates when
+ * it runs over several days. In the current language and the account's time zone, so it
+ * matches the emails and notifications.
+ */
 export function formatEventTime(startsAt: string, endsAt: string | null): string {
+  const locale = currentLocale()
+  const timeZone = currentTimeZone()
+  const dayFormat = new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone,
+  })
+  const timeFormat = new Intl.DateTimeFormat(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  })
   const start = new Date(startsAt)
   const head = `${dayFormat.format(start)} · ${timeFormat.format(start)}`
   if (!endsAt) return head
   const end = new Date(endsAt)
-  const sameDay = start.toDateString() === end.toDateString()
+  const sameDay = isoDateIn(start) === isoDateIn(end)
   return sameDay
     ? `${head} – ${timeFormat.format(end)}`
     : `${head} – ${dayFormat.format(end)} · ${timeFormat.format(end)}`
 }
 
-/** Local "YYYY-MM-DD" and "HH:mm" for date and time inputs. */
+/** "YYYY-MM-DD" and "HH:mm" for date and time inputs, in the account's time zone. */
 export function toLocalInputs(iso: string): { date: string; time: string } {
   const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  }
+  return { date: isoDateIn(d), time: isoTimeIn(d) }
 }
 
-/** The user's local date and time, as an instant the API understands; null if incomplete. */
+/** A date and time typed in the account's time zone, as an instant; null if incomplete. */
 export function fromLocalInputs(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null
-  const value = new Date(`${date}T${time}:00`)
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  const t = /^(\d{2}):(\d{2})$/.exec(time)
+  if (!d || !t) return null
+  const value = fromZoned({
+    year: Number(d[1]),
+    month: Number(d[2]),
+    day: Number(d[3]),
+    hour: Number(t[1]),
+    minute: Number(t[2]),
+  })
   return Number.isNaN(value.getTime()) ? null : value.toISOString()
 }

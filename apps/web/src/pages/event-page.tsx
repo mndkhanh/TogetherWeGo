@@ -19,6 +19,7 @@ import {
 import * as React from "react"
 import { Link, useParams } from "react-router"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { AppShell, useMe } from "@/components/app-shell"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
@@ -61,11 +62,12 @@ import {
 } from "@/lib/events"
 import { money, useEventExpenses } from "@/lib/expenses"
 import { formatRelative } from "@/lib/format"
+import { translateMessage } from "@/i18n/messages"
 import { formErrorMessage } from "@/lib/form-errors"
 import { useGroup } from "@/lib/groups"
 import { cn } from "@/lib/utils"
 
-const RSVP_LABEL: Record<RsvpStatus, string> = { going: "Going", maybe: "Maybe", no: "Can’t go" }
+const RSVP_ORDER: RsvpStatus[] = ["going", "maybe", "no"]
 
 /** A maps search for the place. The text is only ever a query parameter, never a URL. */
 function mapsUrl(location: string): string {
@@ -73,11 +75,12 @@ function mapsUrl(location: string): string {
 }
 
 function RsvpPicker({ event, disabled }: { event: EventDetailResponse; disabled: boolean }) {
+  const { t } = useTranslation()
   const rsvp = useRsvp(event.groupId, event.id)
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium" id="rsvp-label">
-        Are you coming?
+        {t("eventPage.areYouComing")}
       </span>
       <ToggleGroup
         variant="outline"
@@ -88,14 +91,14 @@ function RsvpPicker({ event, disabled }: { event: EventDetailResponse; disabled:
           const next = value[0] as RsvpStatus | undefined
           if (!next) return
           rsvp.mutate(next, {
-            onError: (err) => toast.error(formErrorMessage(err) ?? "Couldn't save your answer"),
+            onError: (err) => toast.error(formErrorMessage(err) ?? t("eventPage.answerFailed")),
           })
         }}
         className="w-full sm:w-auto"
       >
-        {(Object.keys(RSVP_LABEL) as RsvpStatus[]).map((status) => (
+        {RSVP_ORDER.map((status) => (
           <ToggleGroupItem key={status} value={status} className="flex-1 sm:flex-none sm:px-5">
-            {RSVP_LABEL[status]}
+            {t(`eventPage.rsvp.${status}`)}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
@@ -104,17 +107,15 @@ function RsvpPicker({ event, disabled }: { event: EventDetailResponse; disabled:
 }
 
 function WhosComing({ event, myUserId }: { event: EventDetailResponse; myUserId: string }) {
-  const groups: { status: RsvpStatus; title: string }[] = [
-    { status: "going", title: "Going" },
-    { status: "maybe", title: "Maybe" },
-    { status: "no", title: "Can’t go" },
-  ]
+  const { t } = useTranslation()
+  const groups = RSVP_ORDER.map((status) => ({ status, title: t(`eventPage.rsvp.${status}`) }))
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Who’s coming</CardTitle>
+        <CardTitle>{t("eventPage.whosComing")}</CardTitle>
         <CardDescription>
-          {event.going} going{event.maybe > 0 && `, ${event.maybe} maybe`}
+          {t("events.goingCount", { count: event.going })}
+          {event.maybe > 0 && `, ${t("events.maybeCount", { count: event.maybe })}`}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -129,7 +130,7 @@ function WhosComing({ event, myUserId }: { event: EventDetailResponse; myUserId:
                   <li key={p.userId} className="flex items-center gap-2 text-sm">
                     <PersonAvatar person={p} size="sm" />
                     <span className="truncate">
-                      {p.userId === myUserId ? `${p.name} (you)` : p.name}
+                      {p.userId === myUserId ? t("balances.nameYou", { name: p.name }) : p.name}
                     </span>
                   </li>
                 ))}
@@ -155,18 +156,20 @@ function Spending({
   onAdd: () => void
   onOpen: (expenseId: string) => void
 }) {
+  const { t } = useTranslation()
   const expenses = useEventExpenses(event.groupId, event.id)
   const items = expenses.data?.pages.flatMap((p) => p.items) ?? []
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Spending</CardTitle>
+        <CardTitle>{t("eventPage.spending")}</CardTitle>
         <CardDescription>
           {event.spending.count === 0
-            ? "Nothing added for this event yet."
-            : `${money(event.spending.total, event.spending.currency)} across ${event.spending.count} ${
-                event.spending.count === 1 ? "expense" : "expenses"
-              }.`}
+            ? t("eventPage.nothingSpent")
+            : t("eventPage.spentAcross", {
+                amount: money(event.spending.total, event.spending.currency),
+                count: event.spending.count,
+              })}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -181,7 +184,7 @@ function Spending({
                 >
                   <span className="min-w-0 flex-1 truncate">{e.title}</span>
                   <span className="text-muted-foreground">
-                    {e.payer.userId === myUserId ? "You" : e.payer.name}
+                    {e.payer.userId === myUserId ? t("common.you") : e.payer.name}
                   </span>
                   <span className="font-medium tabular-nums">{money(e.amount, e.currency)}</span>
                 </button>
@@ -197,13 +200,13 @@ function Spending({
             disabled={expenses.isFetchingNextPage}
             onClick={() => void expenses.fetchNextPage()}
           >
-            Show more
+            {t("common.showMore")}
           </Button>
         )}
         {canAdd && (
           <Button variant="outline" className="self-start" onClick={onAdd}>
             <PlusIcon data-icon="inline-start" />
-            Add an expense for this
+            {t("eventPage.addExpenseFor")}
           </Button>
         )}
       </CardContent>
@@ -220,13 +223,14 @@ function Comment({
   myUserId: string
   onDelete: (comment: CommentResponse) => void
 }) {
+  const { t } = useTranslation()
   const mine = comment.author.userId === myUserId
   return (
     <li className="group flex gap-3">
       <PersonAvatar person={comment.author} size="sm" className="mt-0.5" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-baseline gap-2 text-sm">
-          <span className="font-medium">{mine ? "You" : comment.author.name}</span>
+          <span className="font-medium">{mine ? t("common.you") : comment.author.name}</span>
           <time
             className="text-xs text-muted-foreground"
             dateTime={comment.createdAt}
@@ -239,7 +243,7 @@ function Comment({
               variant="ghost"
               size="icon-xs"
               className="ml-auto opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
-              aria-label="Delete comment"
+              aria-label={t("eventPage.deleteComment")}
               onClick={() => onDelete(comment)}
             >
               <Trash2Icon />
@@ -264,6 +268,7 @@ function Comments({
   canPost: boolean
   onConfirm: (request: ConfirmRequest) => void
 }) {
+  const { t } = useTranslation()
   const comments = useComments(eventId)
   const add = useAddComment(eventId)
   const remove = useDeleteComment(eventId)
@@ -276,7 +281,7 @@ function Comments({
   async function send() {
     const body = text.trim()
     if (!body) {
-      setError("Write something first")
+      setError(translateMessage("Write something first"))
       return
     }
     try {
@@ -286,26 +291,26 @@ function Comments({
     } catch (err) {
       setError(
         err instanceof ApiError && err.issues[0]
-          ? err.issues[0].message
-          : (formErrorMessage(err) ?? "Couldn't post it. Try again.")
+          ? translateMessage(err.issues[0].message)
+          : (formErrorMessage(err) ?? t("eventPage.postFailed"))
       )
     }
   }
 
   function confirmDelete(comment: CommentResponse) {
     onConfirm({
-      title: "Delete this comment?",
+      title: t("eventPage.deleteCommentTitle"),
       description:
         comment.author.userId === myUserId
-          ? "It disappears for everyone."
-          : `It disappears for everyone. ${comment.author.name} won’t be told.`,
-      confirmLabel: "Delete comment",
+          ? t("eventPage.deleteOwnHint")
+          : t("eventPage.deleteOtherHint", { name: comment.author.name }),
+      confirmLabel: t("eventPage.deleteComment"),
       destructive: true,
       onConfirm: async () => {
         try {
           await remove.mutateAsync(comment.id)
         } catch (err) {
-          toast.error(formErrorMessage(err) ?? "Couldn't delete it")
+          toast.error(formErrorMessage(err) ?? t("eventPage.deleteFailed"))
           throw err
         }
       },
@@ -315,7 +320,7 @@ function Comments({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Chat</CardTitle>
+        <CardTitle>{t("eventPage.chat")}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         {comments.hasNextPage && (
@@ -326,15 +331,15 @@ function Comments({
             disabled={comments.isFetchingNextPage}
             onClick={() => void comments.fetchNextPage()}
           >
-            Show earlier messages
+            {t("eventPage.earlier")}
           </Button>
         )}
         {comments.isPending ? (
           <Skeleton className="h-16" />
         ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No messages yet. Ask who’s driving.</p>
+          <p className="text-sm text-muted-foreground">{t("eventPage.noMessages")}</p>
         ) : (
-          <ol className="flex flex-col gap-4" aria-label="Messages">
+          <ol className="flex flex-col gap-4" aria-label={t("eventPage.messages")}>
             {items.map((c) => (
               <Comment key={c.id} comment={c} myUserId={myUserId} onDelete={confirmDelete} />
             ))}
@@ -350,14 +355,14 @@ function Comments({
           >
             <Field data-invalid={!!error || undefined}>
               <FieldLabel htmlFor="comment-body" className="sr-only">
-                Message
+                {t("eventPage.message")}
               </FieldLabel>
               <Textarea
                 id="comment-body"
                 value={text}
                 rows={2}
                 maxLength={MAX_COMMENT_LENGTH}
-                placeholder="Write a message"
+                placeholder={t("eventPage.writeMessage")}
                 aria-invalid={!!error || undefined}
                 onChange={(e) => {
                   setText(e.target.value)
@@ -378,7 +383,7 @@ function Comments({
               ) : (
                 <SendIcon data-icon="inline-start" />
               )}
-              Send
+              {t("eventPage.send")}
             </Button>
           </form>
         )}
@@ -388,18 +393,19 @@ function Comments({
 }
 
 function NotFound({ groupId }: { groupId: string }) {
+  const { t } = useTranslation()
   return (
     <Empty className="border border-dashed bg-card">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <CalendarDaysIcon />
         </EmptyMedia>
-        <EmptyTitle>Event not found</EmptyTitle>
-        <EmptyDescription>It may be in a group you’re not part of.</EmptyDescription>
+        <EmptyTitle>{t("eventPage.notFound")}</EmptyTitle>
+        <EmptyDescription>{t("eventPage.notFoundHint")}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
         <Button render={<Link to={`/groups/${groupId}?tab=events`} />} nativeButton={false}>
-          Back to the group
+          {t("eventPage.backToGroup")}
         </Button>
       </EmptyContent>
     </Empty>
@@ -407,6 +413,7 @@ function NotFound({ groupId }: { groupId: string }) {
 }
 
 export function EventPage() {
+  const { t } = useTranslation()
   const { groupId = "", eventId = "" } = useParams()
   const me = useMe()
   const event = useEvent(eventId)
@@ -421,7 +428,7 @@ export function EventPage() {
   if (event.isPending || group.isPending) {
     return (
       <AppShell>
-        <div className="flex flex-col gap-4" aria-label="Loading">
+        <div className="flex flex-col gap-4" aria-label={t("common.loading")}>
           <Skeleton className="h-10 w-64" />
           <Skeleton className="h-40" />
         </div>
@@ -437,7 +444,7 @@ export function EventPage() {
         ) : (
           <Alert variant="destructive">
             <AlertDescription>
-              {formErrorMessage(event.error ?? group.error) ?? "Couldn't load this event."}
+              {formErrorMessage(event.error ?? group.error) ?? t("eventPage.loadFailed")}
             </AlertDescription>
           </Alert>
         )}
@@ -452,17 +459,16 @@ export function EventPage() {
 
   function confirmCancel() {
     setConfirm({
-      title: `Cancel ${data.title}?`,
-      description:
-        "Everyone sees it as cancelled and can’t RSVP any more. The chat and any expenses stay.",
-      confirmLabel: "Cancel event",
+      title: t("eventPage.cancelTitle", { title: data.title }),
+      description: t("eventPage.cancelHint"),
+      confirmLabel: t("eventPage.cancelEvent"),
       destructive: true,
       onConfirm: async () => {
         try {
           await cancel.mutateAsync(undefined)
-          toast.success("Event cancelled")
+          toast.success(t("eventPage.cancelled"))
         } catch (err) {
-          toast.error(formErrorMessage(err) ?? "Couldn't cancel it. Try again.")
+          toast.error(formErrorMessage(err) ?? t("eventPage.cancelFailed"))
           throw err
         }
       },
@@ -511,14 +517,16 @@ export function EventPage() {
               </p>
             )}
             <p className="text-sm text-muted-foreground">
-              Planned by {data.createdBy.userId === me.id ? "you" : data.createdBy.name}
+              {data.createdBy.userId === me.id
+                ? t("eventPage.plannedByYou")
+                : t("eventPage.plannedBy", { name: data.createdBy.name })}
             </p>
           </div>
           {canChange && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="outline" size="icon" />}
-                aria-label="Event options"
+                aria-label={t("eventPage.options")}
               >
                 <EllipsisIcon />
               </DropdownMenuTrigger>
@@ -526,11 +534,11 @@ export function EventPage() {
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => setEditing(true)}>
                     <PencilIcon />
-                    Edit event
+                    {t("eventPage.editEvent")}
                   </DropdownMenuItem>
                   <DropdownMenuItem variant="destructive" onClick={confirmCancel}>
                     <XCircleIcon />
-                    Cancel event
+                    {t("eventPage.cancelEvent")}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
@@ -540,8 +548,8 @@ export function EventPage() {
 
         {cancelled && (
           <Alert>
-            <AlertTitle>This event was cancelled</AlertTitle>
-            <AlertDescription>The chat and expenses are kept for the record.</AlertDescription>
+            <AlertTitle>{t("eventPage.wasCancelled")}</AlertTitle>
+            <AlertDescription>{t("eventPage.keptForRecord")}</AlertDescription>
           </Alert>
         )}
         {data.description && (

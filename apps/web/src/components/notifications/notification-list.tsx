@@ -10,6 +10,7 @@ import {
   UserPlusIcon,
 } from "lucide-react"
 import { useNavigate } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { formatRelative } from "@/lib/format"
 import { useMarkRead } from "@/lib/notifications"
@@ -33,6 +34,7 @@ export function NotificationList({
   items: NotificationResponse[]
   onOpen?: () => void
 }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const markRead = useMarkRead()
 
@@ -69,7 +71,7 @@ export function NotificationList({
               {!n.read && (
                 <span
                   className="mt-2 size-2 shrink-0 rounded-full bg-primary"
-                  aria-label="Unread"
+                  aria-label={t("notifications.unread")}
                 />
               )}
             </button>

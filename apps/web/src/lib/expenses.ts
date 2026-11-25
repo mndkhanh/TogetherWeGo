@@ -13,6 +13,8 @@ import {
   type UpdateExpenseInput,
 } from "@twg/shared"
 
+import i18n from "@/i18n"
+import { isoDateIn } from "@/lib/time"
 import { api } from "@/lib/api"
 
 export const expenseKeys = {
@@ -28,9 +30,9 @@ export function money(amount: number, currency: Currency): string {
   return formatMoney(amount, currency, currency === "VND" ? "vi-VN" : "en-US")
 }
 
-/** Today in the user's own calendar, as YYYY-MM-DD. */
+/** Today in the account's time zone, as YYYY-MM-DD. */
 export function today(): string {
-  return new Date().toLocaleDateString("en-CA")
+  return isoDateIn(new Date())
 }
 
 export function useExpenses(groupId: string) {
@@ -123,10 +125,10 @@ export class ReceiptError extends Error {}
 /** Checks the file, asks the API for a signed upload, then sends the photo straight to storage. */
 export async function uploadReceipt(groupId: string, file: File): Promise<string> {
   if (!(RECEIPT_CONTENT_TYPES as readonly string[]).includes(file.type)) {
-    throw new ReceiptError("Use a JPEG, PNG or WebP photo")
+    throw new ReceiptError(i18n.t("receipt.type"))
   }
   if (file.size > MAX_RECEIPT_BYTES) {
-    throw new ReceiptError(`Use a photo under ${MAX_RECEIPT_BYTES / 1024 / 1024} MB`)
+    throw new ReceiptError(i18n.t("receipt.size", { mb: MAX_RECEIPT_BYTES / 1024 / 1024 }))
   }
   const upload = await api<ReceiptUploadResponse>(`/groups/${groupId}/receipts`, {
     method: "POST",
@@ -136,6 +138,6 @@ export async function uploadReceipt(groupId: string, file: File): Promise<string
   for (const [key, value] of Object.entries(upload.fields)) form.append(key, value)
   form.append("file", file)
   const res = await fetch(upload.url, { method: "POST", body: form })
-  if (!res.ok) throw new ReceiptError("The photo didn't upload. Try again.")
+  if (!res.ok) throw new ReceiptError(i18n.t("receipt.uploadFailed"))
   return upload.key
 }

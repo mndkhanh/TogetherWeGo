@@ -1,5 +1,7 @@
 import type { SettlementResponse } from "@twg/shared"
 import { ArrowRightIcon } from "lucide-react"
+import type { TFunction } from "i18next"
+import { useTranslation } from "react-i18next"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,12 +11,15 @@ import { formatRelative } from "@/lib/format"
 import { useSettlements } from "@/lib/payments"
 import { cn } from "@/lib/utils"
 
-function statusOf(s: SettlementResponse): { label: string; urgent: boolean } {
+function statusOf(s: SettlementResponse, t: TFunction): { label: string; urgent: boolean } {
   if (s.status === "confirmed") {
-    return { label: s.confirmedVia === "sepay" ? "Paid · bank" : "Paid", urgent: false }
+    return {
+      label: s.confirmedVia === "sepay" ? t("payments.paidBank") : t("payments.paid"),
+      urgent: false,
+    }
   }
-  if (s.canConfirm) return { label: "Did it arrive?", urgent: true }
-  return { label: "Waiting", urgent: false }
+  if (s.canConfirm) return { label: t("payments.didItArrive"), urgent: true }
+  return { label: t("payments.waiting"), urgent: false }
 }
 
 /** The group's payments: anything waiting first, then the most recent. */
@@ -27,6 +32,7 @@ export function PaymentsList({
   myUserId: string
   onOpen: (id: string) => void
 }) {
+  const { t } = useTranslation()
   const payments = useSettlements(groupId)
   if (payments.isPending) return <Skeleton className="h-32" />
   if (!payments.data || payments.data.length === 0) return null
@@ -37,17 +43,17 @@ export function PaymentsList({
       b.createdAt.localeCompare(a.createdAt)
   )
   const nameOf = (person: { userId: string; name: string }) =>
-    person.userId === myUserId ? "You" : person.name
+    person.userId === myUserId ? t("common.you") : person.name
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Payments</CardTitle>
+        <CardTitle>{t("payments.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <ul className="-mx-3 flex flex-col">
           {items.slice(0, 20).map((s) => {
-            const status = statusOf(s)
+            const status = statusOf(s, t)
             return (
               <li key={s.id}>
                 <button
@@ -60,7 +66,7 @@ export function PaymentsList({
                       <span className="truncate">{nameOf(s.from)}</span>
                       <ArrowRightIcon
                         className="size-3.5 shrink-0 text-muted-foreground"
-                        aria-label="paid"
+                        aria-label={t("payments.paidArrow")}
                       />
                       <span className="truncate">{nameOf(s.to)}</span>
                     </span>

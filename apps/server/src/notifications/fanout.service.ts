@@ -6,6 +6,7 @@ import {
   NOTIFICATION_DEFAULTS,
   NOTIFICATION_TYPES,
   type NotificationType,
+  toLocale,
 } from '@twg/shared';
 import type { Queue } from 'bullmq';
 import { personSelect } from '../expenses/expense-mappers.js';
@@ -169,10 +170,12 @@ export class FanoutService {
       }
 
       if (pref?.email ?? defaults.email) {
-        const { text, link } = describeNotification(event.type as NotificationType, data);
+        const reader = { locale: toLocale(user.locale), timeZone: user.timeZone };
+        const { text, link } = describeNotification(event.type as NotificationType, data, reader);
         const email = renderNotificationEmail({
           to: user.email,
           name: user.name,
+          locale: reader.locale,
           text,
           url: `${this.config.appOrigin}${link}`,
           settingsUrl: `${this.config.appOrigin}/settings/notifications`,
@@ -211,7 +214,7 @@ export class FanoutService {
       : {};
     return tx.user.findMany({
       where: { id: { ...targeted, ...notActor }, ...inGroup },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, locale: true, timeZone: true },
     });
   }
 
@@ -249,10 +252,16 @@ export class FanoutService {
         where: { id: { in: notificationIds } },
       });
       const actorIds = [...new Set(rows.map((r) => r.actorId).filter((id) => id !== null))];
-      const actors = new Map(
-        (
-          await this.prisma.user.findMany({ where: { id: { in: actorIds } }, select: personSelect })
-        ).map((a) => [a.id, a]),
+      const [actorRows, readerRows] = await Promise.all([
+        this.prisma.user.findMany({ where: { id: { in: actorIds } }, select: personSelect }),
+        this.prisma.user.findMany({
+          where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
+          select: { id: true, locale: true, timeZone: true },
+        }),
+      ]);
+      const actors = new Map(actorRows.map((a) => [a.id, a]));
+      const readers = new Map(
+        readerRows.map((u) => [u.id, { locale: toLocale(u.locale), timeZone: u.timeZone }]),
       );
       for (const row of rows) {
         const unreadCount = await this.prisma.notification.count({
@@ -262,6 +271,7 @@ export class FanoutService {
           notification: toNotificationResponse(
             row,
             row.actorId ? (actors.get(row.actorId) ?? null) : null,
+            readers.get(row.userId),
           ),
           unreadCount,
         });

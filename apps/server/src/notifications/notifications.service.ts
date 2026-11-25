@@ -6,6 +6,7 @@ import {
   type NotificationPageResponse,
   type NotificationPreferenceResponse,
   type NotificationPreferencesInput,
+  toLocale,
 } from '@twg/shared';
 import { personSelect } from '../expenses/expense-mappers.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
@@ -18,7 +19,7 @@ export class NotificationsService {
 
   async list(userId: string, query: ListNotificationsQuery): Promise<NotificationPageResponse> {
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-    const [rows, unreadCount] = await Promise.all([
+    const [rows, unreadCount, reader] = await Promise.all([
       this.prisma.notification.findMany({
         where: {
           userId,
@@ -30,6 +31,10 @@ export class NotificationsService {
         take: query.limit + 1,
       }),
       this.unreadCount(userId),
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { locale: true, timeZone: true },
+      }),
     ]);
     const page = rows.slice(0, query.limit);
     const actorIds = [...new Set(page.map((r) => r.actorId).filter((id) => id !== null))];
@@ -41,7 +46,10 @@ export class NotificationsService {
     const last = page.at(-1);
     return {
       items: page.map((r) =>
-        toNotificationResponse(r, r.actorId ? (actors.get(r.actorId) ?? null) : null),
+        toNotificationResponse(r, r.actorId ? (actors.get(r.actorId) ?? null) : null, {
+          locale: toLocale(reader.locale),
+          timeZone: reader.timeZone,
+        }),
       ),
       nextCursor:
         rows.length > query.limit && last

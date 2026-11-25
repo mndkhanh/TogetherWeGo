@@ -1,3 +1,4 @@
+export * from './i18n/locale.js';
 export * from './money/money.js';
 export * from './money/splits.js';
 export * from './payments/banks.js';

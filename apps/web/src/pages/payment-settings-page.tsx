@@ -10,6 +10,7 @@ import { ArrowLeftIcon, BanknoteIcon, CircleCheckIcon, ZapIcon } from "lucide-re
 import * as React from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { AppShell, useMe } from "@/components/app-shell"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
@@ -68,6 +69,7 @@ function BankAccountCard({
   defaultName: string
   onConfirm: (request: ConfirmRequest) => void
 }) {
+  const { t } = useTranslation()
   const [bankBin, setBankBin] = React.useState(account?.bankBin ?? "")
   const [holderName, setHolderName] = React.useState(
     account?.holderName ?? normalizeHolderName(defaultName)
@@ -94,11 +96,7 @@ function BankAccountCard({
     try {
       const saved = await save.mutateAsync(data)
       setHolderName(saved.holderName)
-      toast.success(
-        movesAccount
-          ? "Bank account saved. SePay is off until you set it up again."
-          : "Bank account saved"
-      )
+      toast.success(movesAccount ? t("paySettings.savedMoved") : t("paySettings.saved"))
     } catch (error) {
       if (error instanceof ApiError) setFieldErrors(toFieldErrors(error.issues))
       setFormError(formErrorMessage(error))
@@ -107,18 +105,17 @@ function BankAccountCard({
 
   function confirmRemove() {
     onConfirm({
-      title: "Remove your bank account?",
-      description:
-        "People paying you won't see a QR code any more, and SePay stops confirming payments. Payments you already got stay as they are.",
-      confirmLabel: "Remove bank account",
+      title: t("paySettings.removeTitle"),
+      description: t("paySettings.removeHint"),
+      confirmLabel: t("paySettings.removeConfirm"),
       destructive: true,
       onConfirm: async () => {
         try {
           await remove.mutateAsync(undefined)
           setBankBin("")
-          toast.success("Bank account removed")
+          toast.success(t("paySettings.removed"))
         } catch (error) {
-          toast.error(formErrorMessage(error) ?? "Couldn't remove it. Try again.")
+          toast.error(formErrorMessage(error) ?? t("paySettings.removeFailed"))
           throw error
         }
       },
@@ -129,11 +126,8 @@ function BankAccountCard({
     <Card>
       <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
         <CardHeader>
-          <CardTitle>Bank account</CardTitle>
-          <CardDescription>
-            Where people in your groups send money they owe you. Only the person paying you sees it,
-            on the payment screen.
-          </CardDescription>
+          <CardTitle>{t("paySettings.bankAccount")}</CardTitle>
+          <CardDescription>{t("paySettings.bankAccountHint")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           {formError && (
@@ -143,7 +137,7 @@ function BankAccountCard({
           )}
           <FieldGroup>
             <Field data-invalid={!!fieldErrors.bankBin || undefined}>
-              <FieldLabel htmlFor="bank">Bank</FieldLabel>
+              <FieldLabel htmlFor="bank">{t("paySettings.bank")}</FieldLabel>
               <Select
                 items={bankItems}
                 value={bankBin || null}
@@ -157,7 +151,7 @@ function BankAccountCard({
                   className="w-full"
                   aria-invalid={!!fieldErrors.bankBin || undefined}
                 >
-                  <SelectValue placeholder="Choose your bank" />
+                  <SelectValue placeholder={t("paySettings.chooseBank")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -172,7 +166,7 @@ function BankAccountCard({
               <FieldError>{fieldErrors.bankBin}</FieldError>
             </Field>
             <Field data-invalid={!!fieldErrors.accountNumber || undefined}>
-              <FieldLabel htmlFor="account-number">Account number</FieldLabel>
+              <FieldLabel htmlFor="account-number">{t("paySettings.accountNumber")}</FieldLabel>
               <Input
                 id="account-number"
                 name="accountNumber"
@@ -185,7 +179,7 @@ function BankAccountCard({
               <FieldError>{fieldErrors.accountNumber}</FieldError>
             </Field>
             <Field data-invalid={!!fieldErrors.holderName || undefined}>
-              <FieldLabel htmlFor="holder-name">Name on the account</FieldLabel>
+              <FieldLabel htmlFor="holder-name">{t("paySettings.holderName")}</FieldLabel>
               <Input
                 id="holder-name"
                 value={holderName}
@@ -197,7 +191,7 @@ function BankAccountCard({
                 }}
                 onBlur={() => setHolderName(normalizeHolderName(holderName))}
               />
-              <FieldDescription>As your bank shows it, without accents.</FieldDescription>
+              <FieldDescription>{t("paySettings.holderHint")}</FieldDescription>
               <FieldError>{fieldErrors.holderName}</FieldError>
             </Field>
           </FieldGroup>
@@ -205,11 +199,11 @@ function BankAccountCard({
         <CardFooter className="flex flex-wrap justify-between gap-3">
           <Button type="submit" disabled={save.isPending}>
             {save.isPending && <Spinner data-icon="inline-start" />}
-            {account ? "Save changes" : "Save bank account"}
+            {account ? t("common.saveChanges") : t("paySettings.saveAccount")}
           </Button>
           {account && (
             <Button type="button" variant="ghost" onClick={confirmRemove}>
-              Remove
+              {t("paySettings.remove")}
             </Button>
           )}
         </CardFooter>
@@ -225,40 +219,44 @@ function SepayKeyDialog({
   result: SepayKeyResponse | null
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <Dialog open={result !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Finish in SePay</DialogTitle>
+          <DialogTitle>{t("paySettings.finishTitle")}</DialogTitle>
           <DialogDescription>
-            In SePay, go to Webhooks and add one for your {result?.account.bankName} account with
-            these settings.
+            {t("paySettings.finishHint", { bank: result?.account.bankName ?? "" })}
           </DialogDescription>
         </DialogHeader>
         {result && (
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="sepay-url">Webhook URL</FieldLabel>
-              <CopyValue id="sepay-url" value={result.webhookUrl} label="Webhook URL" />
+              <FieldLabel htmlFor="sepay-url">{t("paySettings.webhookUrl")}</FieldLabel>
+              <CopyValue
+                id="sepay-url"
+                value={result.webhookUrl}
+                label={t("paySettings.webhookUrl")}
+              />
             </Field>
             <Field>
-              <FieldLabel htmlFor="sepay-key">API key</FieldLabel>
-              <CopyValue id="sepay-key" value={result.apiKey} label="API key" mono />
-              <FieldDescription>
-                Choose “API Key” as the authentication type. This is the only time you’ll see the
-                key: if you lose it, make a new one.
-              </FieldDescription>
+              <FieldLabel htmlFor="sepay-key">{t("paySettings.apiKey")}</FieldLabel>
+              <CopyValue
+                id="sepay-key"
+                value={result.apiKey}
+                label={t("paySettings.apiKey")}
+                mono
+              />
+              <FieldDescription>{t("paySettings.apiKeyHint")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel>Event</FieldLabel>
-              <FieldDescription>
-                Money in (“Có tiền vào”). Leave the rest as it is.
-              </FieldDescription>
+              <FieldLabel>{t("paySettings.event")}</FieldLabel>
+              <FieldDescription>{t("paySettings.eventHint")}</FieldDescription>
             </Field>
           </FieldGroup>
         )}
         <DialogFooter>
-          <Button onClick={onClose}>Done</Button>
+          <Button onClick={onClose}>{t("paySettings.done")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -272,6 +270,7 @@ function SepayCard({
   account: PaymentAccountResponse
   onConfirm: (request: ConfirmRequest) => void
 }) {
+  const { t } = useTranslation()
   const [result, setResult] = React.useState<SepayKeyResponse | null>(null)
   const create = useCreateSepayKey()
   const remove = useRemoveSepayKey()
@@ -281,33 +280,31 @@ function SepayCard({
     try {
       setResult(await create.mutateAsync(undefined))
     } catch (error) {
-      toast.error(formErrorMessage(error) ?? "Couldn't set up SePay. Try again.")
+      toast.error(formErrorMessage(error) ?? t("paySettings.setupFailed"))
     }
   }
 
   function confirmNewKey() {
     onConfirm({
-      title: "Make a new key?",
-      description:
-        "The old key stops working straight away. Payments won't confirm on their own until you put the new key in SePay.",
-      confirmLabel: "Make a new key",
+      title: t("paySettings.newKeyTitle"),
+      description: t("paySettings.newKeyHint"),
+      confirmLabel: t("paySettings.newKey"),
       onConfirm: makeKey,
     })
   }
 
   function confirmTurnOff() {
     onConfirm({
-      title: "Turn off automatic confirmation?",
-      description:
-        "You'll confirm payments yourself. Remove the webhook in SePay too, so it stops sending.",
-      confirmLabel: "Turn off",
+      title: t("paySettings.turnOffTitle"),
+      description: t("paySettings.turnOffHint"),
+      confirmLabel: t("paySettings.turnOff"),
       destructive: true,
       onConfirm: async () => {
         try {
           await remove.mutateAsync(undefined)
-          toast.success("Automatic confirmation turned off")
+          toast.success(t("paySettings.turnedOff"))
         } catch (error) {
-          toast.error(formErrorMessage(error) ?? "Couldn't turn it off. Try again.")
+          toast.error(formErrorMessage(error) ?? t("paySettings.turnOffFailed"))
           throw error
         }
       },
@@ -318,30 +315,25 @@ function SepayCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Confirm payments automatically
-          {account.sepayConnected && <Badge variant="secondary">On</Badge>}
+          {t("paySettings.autoTitle")}
+          {account.sepayConnected && <Badge variant="secondary">{t("paySettings.on")}</Badge>}
         </CardTitle>
-        <CardDescription>
-          With a free SePay account watching your bank account, payments to you are marked as paid
-          the moment the money arrives. Without it, you confirm each payment yourself.
-        </CardDescription>
+        <CardDescription>{t("paySettings.autoHint")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {!supported && (
           <Alert>
-            <AlertTitle>SePay can’t watch {account.bankName} accounts yet</AlertTitle>
-            <AlertDescription>
-              People can still pay you by QR code; you confirm the payments yourself.
-            </AlertDescription>
+            <AlertTitle>{t("paySettings.unsupported", { bank: account.bankName })}</AlertTitle>
+            <AlertDescription>{t("paySettings.unsupportedHint")}</AlertDescription>
           </Alert>
         )}
         {account.sepayConnected && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <CircleCheckIcon className="size-4 text-primary" />
             {account.sepayLastEventAt
-              ? `Last heard from SePay ${formatRelative(account.sepayLastEventAt)}.`
-              : "Waiting for the first transfer from SePay."}{" "}
-            Key ends in {account.sepayKeyHint}.
+              ? t("paySettings.lastHeard", { when: formatRelative(account.sepayLastEventAt) })
+              : t("paySettings.waitingFirst")}{" "}
+            {t("paySettings.keyEnds", { hint: account.sepayKeyHint })}
           </p>
         )}
       </CardContent>
@@ -349,10 +341,10 @@ function SepayCard({
         {account.sepayConnected ? (
           <>
             <Button variant="outline" onClick={confirmNewKey}>
-              Make a new key
+              {t("paySettings.newKey")}
             </Button>
             <Button variant="ghost" onClick={confirmTurnOff}>
-              Turn off
+              {t("paySettings.turnOff")}
             </Button>
           </>
         ) : (
@@ -362,7 +354,7 @@ function SepayCard({
             ) : (
               <ZapIcon data-icon="inline-start" />
             )}
-            Set up SePay
+            {t("paySettings.setUp")}
           </Button>
         )}
       </CardFooter>
@@ -372,6 +364,7 @@ function SepayCard({
 }
 
 export function PaymentSettingsPage() {
+  const { t } = useTranslation()
   const me = useMe()
   const account = usePaymentAccount()
   const [confirm, setConfirm] = React.useState<ConfirmRequest | null>(null)
@@ -387,30 +380,28 @@ export function PaymentSettingsPage() {
           render={<Link to="/" />}
         >
           <ArrowLeftIcon data-icon="inline-start" />
-          Your groups
+          {t("common.yourGroups")}
         </Button>
         <div className="flex flex-col gap-2">
           <h1 className="flex items-center gap-3 text-3xl font-extrabold tracking-tight sm:text-4xl">
             <BanknoteIcon className="size-8 text-primary" aria-hidden />
-            Getting paid
+            {t("paySettings.heading")}
           </h1>
-          <p className="max-w-prose text-muted-foreground">
-            Money goes straight from their bank to yours. TogetherWeGo never holds it.
-          </p>
+          <p className="max-w-prose text-muted-foreground">{t("paySettings.intro")}</p>
         </div>
       </section>
 
       {account.isPending ? (
-        <div className="flex flex-col gap-4" aria-label="Loading">
+        <div className="flex flex-col gap-4" aria-label={t("common.loading")}>
           <Skeleton className="h-80" />
           <Skeleton className="h-40" />
         </div>
       ) : account.isError ? (
         <Alert variant="destructive">
           <AlertDescription className="flex items-center justify-between gap-4">
-            Couldn't load your bank details.
+            {t("paySettings.loadFailed")}
             <Button variant="outline" size="sm" onClick={() => void account.refetch()}>
-              Try again
+              {t("common.tryAgain")}
             </Button>
           </AlertDescription>
         </Alert>

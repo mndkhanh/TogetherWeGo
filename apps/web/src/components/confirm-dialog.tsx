@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useTranslation } from "react-i18next"
 
 import {
   AlertDialog,
@@ -29,6 +30,7 @@ export function ConfirmDialog({
   request: ConfirmRequest | null
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const [pending, setPending] = React.useState(false)
 
   async function confirm() {
@@ -52,7 +54,7 @@ export function ConfirmDialog({
           <AlertDialogDescription>{request?.description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant={request?.destructive ? "destructive" : "default"}
             disabled={pending}

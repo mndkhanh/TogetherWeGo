@@ -1,6 +1,7 @@
 import { BellIcon } from "lucide-react"
 import * as React from "react"
 import { Link } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { NotificationList } from "@/components/notifications/notification-list"
 import { Button } from "@/components/ui/button"
@@ -9,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { unreadCountOf, useMarkAllRead, useNotifications } from "@/lib/notifications"
 
 export function NotificationBell() {
+  const { t } = useTranslation()
   const feed = useNotifications()
   const markAll = useMarkAllRead()
   const [open, setOpen] = React.useState(false)
@@ -19,7 +21,9 @@ export function NotificationBell() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={<Button variant="ghost" size="icon-lg" className="relative rounded-full" />}
-        aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+        aria-label={
+          unread > 0 ? t("notifications.bellUnread", { count: unread }) : t("notifications.title")
+        }
       >
         <BellIcon />
         {unread > 0 && (
@@ -33,7 +37,7 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(24rem,calc(100vw-2rem))] gap-0 p-0">
         <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-          <h2 className="font-semibold">Notifications</h2>
+          <h2 className="font-semibold">{t("notifications.title")}</h2>
           {unread > 0 && (
             <Button
               variant="ghost"
@@ -41,7 +45,7 @@ export function NotificationBell() {
               disabled={markAll.isPending}
               onClick={() => markAll.mutate(undefined)}
             >
-              Mark all read
+              {t("notifications.markAllRead")}
             </Button>
           )}
         </div>
@@ -53,7 +57,7 @@ export function NotificationBell() {
             </div>
           ) : items.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Nothing yet. New expenses, events and payments show up here.
+              {t("notifications.nothingYet")}
             </p>
           ) : (
             <NotificationList items={items} onOpen={() => setOpen(false)} />
@@ -66,7 +70,7 @@ export function NotificationBell() {
             nativeButton={false}
             render={<Link to="/notifications" onClick={() => setOpen(false)} />}
           >
-            See all
+            {t("notifications.seeAll")}
           </Button>
           <Button
             variant="ghost"
@@ -74,7 +78,7 @@ export function NotificationBell() {
             nativeButton={false}
             render={<Link to="/settings/notifications" onClick={() => setOpen(false)} />}
           >
-            Settings
+            {t("notifications.settings")}
           </Button>
         </div>
       </PopoverContent>

@@ -17,6 +17,7 @@ import { useNavigate } from "react-router"
 import { io, type Socket } from "socket.io-client"
 import { toast } from "sonner"
 
+import i18n from "@/i18n"
 import { api, getAccessToken, refreshSession } from "@/lib/api"
 
 export const notificationKeys = {
@@ -186,7 +187,10 @@ export function useRealtime(enabled: boolean): void {
         void queryClient.invalidateQueries({ queryKey })
       }
       toast(notification.text, {
-        action: { label: "Open", onClick: () => void navigate(notification.link) },
+        action: {
+          label: i18n.t("notifications.open"),
+          onClick: () => void navigate(notification.link),
+        },
       })
     })
 

@@ -38,6 +38,23 @@ variable "redis_node_type" {
   default = "cache.t4g.micro"
 }
 
+variable "redis_replicas" {
+  description = "Read replicas in other AZs. 1+ turns on automatic failover (prod)."
+  type        = number
+  default     = 0
+}
+
+variable "db_backup_retention_days" {
+  type    = number
+  default = 7
+}
+
+variable "db_performance_insights" {
+  description = "Performance Insights (free tier: 7 days of history)"
+  type        = bool
+  default     = false
+}
+
 # ---------- Postgres ----------
 
 resource "aws_security_group" "db" {
@@ -98,14 +115,14 @@ resource "aws_db_instance" "this" {
   publicly_accessible    = false
   multi_az               = var.db_multi_az
 
-  backup_retention_period         = 7
+  backup_retention_period         = var.db_backup_retention_days
   copy_tags_to_snapshot           = true
   deletion_protection             = var.deletion_protection
   skip_final_snapshot             = !var.deletion_protection
   final_snapshot_identifier       = var.deletion_protection ? "${var.name}-final" : null
   auto_minor_version_upgrade      = true
   enabled_cloudwatch_logs_exports = ["postgresql"]
-  performance_insights_enabled    = false
+  performance_insights_enabled    = var.db_performance_insights
 }
 
 # ---------- Redis (Valkey) ----------
@@ -141,8 +158,11 @@ resource "aws_elasticache_replication_group" "this" {
   engine               = "valkey"
   engine_version       = "8.0"
   node_type            = var.redis_node_type
-  num_cache_clusters   = 1
+  num_cache_clusters   = 1 + var.redis_replicas
   port                 = 6379
+  # With a replica in another AZ, ElastiCache promotes it if the primary fails.
+  automatic_failover_enabled = var.redis_replicas > 0
+  multi_az_enabled           = var.redis_replicas > 0
 
   subnet_group_name  = aws_elasticache_subnet_group.this.name
   security_group_ids = [aws_security_group.redis.id]
@@ -151,7 +171,7 @@ resource "aws_elasticache_replication_group" "this" {
   at_rest_encryption_enabled = true
   auth_token                 = random_password.redis_auth.result
 
-  snapshot_retention_limit = 1
+  snapshot_retention_limit = var.redis_replicas > 0 ? 7 : 1
   apply_immediately        = true
 }
 
@@ -171,4 +191,16 @@ output "db_master_secret_arn" {
 output "redis_url" {
   value     = "rediss://:${random_password.redis_auth.result}@${aws_elasticache_replication_group.this.primary_endpoint_address}:6379"
   sensitive = true
+}
+
+output "db_instance_identifier" {
+  description = "For CloudWatch alarm dimensions"
+  value       = aws_db_instance.this.identifier
+}
+
+output "redis_cache_cluster_ids" {
+  description = "The nodes of the replication group, for CloudWatch alarm dimensions"
+  # ElastiCache names them <group>-001, -002, ... Built from inputs (not member_clusters,
+  # which is only known after apply) so alarms can be planned with for_each.
+  value = [for i in range(1 + var.redis_replicas) : format("%s-%03d", var.name, i + 1)]
 }

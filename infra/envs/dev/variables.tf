@@ -42,3 +42,15 @@ variable "google_client_secret" {
   default   = ""
   sensitive = true
 }
+
+variable "alarm_emails" {
+  description = "Who gets CloudWatch alarms. Each address must confirm the SNS subscription email."
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_waf" {
+  description = "WAF on CloudFront (about $10/month plus requests). Off in dev by default."
+  type        = bool
+  default     = false
+}

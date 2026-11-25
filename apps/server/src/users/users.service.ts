@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { MeResponse, UpdateMeInput } from '@twg/shared';
+import { type MeResponse, toLocale, type UpdateMeInput } from '@twg/shared';
 import type { User } from '../generated/prisma/client.js';
 import { PrismaService } from '../infra/prisma/prisma.service.js';
 
@@ -16,6 +16,8 @@ export function toMeResponse(user: User): MeResponse {
     name: user.name,
     avatarUrl: avatarUrlFor(user.avatarKey),
     defaultCurrency: user.defaultCurrency,
+    locale: toLocale(user.locale),
+    timeZone: user.timeZone,
     hasPassword: user.passwordHash !== null,
     googleLinked: user.googleSub !== null,
     createdAt: user.createdAt.toISOString(),

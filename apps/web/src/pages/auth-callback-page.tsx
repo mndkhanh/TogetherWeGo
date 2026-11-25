@@ -1,5 +1,6 @@
 import * as React from "react"
 import { useNavigate } from "react-router"
+import { useTranslation } from "react-i18next"
 
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/lib/auth"
@@ -7,6 +8,7 @@ import { peekReturnTo } from "@/lib/return-to"
 
 /** Landing page after Google sign-in: the server has set the refresh cookie, so restore the session. */
 export function AuthCallbackPage() {
+  const { t } = useTranslation()
   const { restore } = useAuth()
   const navigate = useNavigate()
 
@@ -19,7 +21,7 @@ export function AuthCallbackPage() {
   return (
     <div className="flex min-h-svh items-center justify-center gap-3 text-muted-foreground">
       <Spinner />
-      Signing you in
+      {t("auth.signingIn")}
     </div>
   )
 }

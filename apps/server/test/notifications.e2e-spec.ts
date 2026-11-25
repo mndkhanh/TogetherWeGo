@@ -11,7 +11,8 @@ import { QUEUES } from '../src/jobs/queues.js';
 import { FanoutService } from '../src/notifications/fanout.service.js';
 import { NotificationsCoreModule } from '../src/notifications/notifications.module.js';
 import { REALTIME_PATH } from '../src/notifications/realtime.gateway.js';
-import { as, createTestApp, ORIGIN, registerUser, type TestUser } from './helpers.js';
+import request from 'supertest';
+import { as, createTestApp, ORIGIN, PASSWORD, registerUser, type TestUser } from './helpers.js';
 
 const PREFIX = `e2e-notify-${randomUUID().slice(0, 8)}`;
 
@@ -335,6 +336,57 @@ describe('Notifications (e2e)', () => {
       expect(leaked).toEqual([]);
       mine.close();
       theirs.close();
+    });
+  });
+
+  describe('language and time zone', () => {
+    it('writes the feed and emails in each reader’s language, with times in their zone', async () => {
+      const reg = await request(app.getHttpServer())
+        .post('/v1/auth/register')
+        .send({
+          email: `${PREFIX}-${randomUUID()}@example.com`,
+          password: PASSWORD,
+          name: 'Dũng',
+          locale: 'vi',
+          timeZone: 'Europe/London',
+        })
+        .expect(201);
+      expect(reg.body.user).toMatchObject({ locale: 'vi', timeZone: 'Europe/London' });
+      const dung: TestUser = {
+        id: reg.body.user.id,
+        email: reg.body.user.email,
+        name: 'Dũng',
+        token: reg.body.accessToken,
+      };
+
+      // Only languages we speak and real time zones.
+      await as(app, dung).patch('/v1/me').send({ locale: 'fr' }).expect(400);
+      await as(app, dung).patch('/v1/me').send({ timeZone: 'Mars/Olympus' }).expect(400);
+
+      const groupId = await group([dung], 'Hội bạn');
+      await as(app, owner)
+        .post(`/v1/groups/${groupId}/events`)
+        .send({ title: 'Lẩu', startsAt: '2027-01-14T12:00:00.000Z' })
+        .expect(201);
+      await fanout.processPending();
+
+      const [created] = (await feed(dung)).items.filter((n) => n.type === 'event.created');
+      // 12:00 UTC is 12:00 in London (winter), shown Vietnamese-style.
+      expect(created?.text).toBe(
+        'An Owner đã lên lịch Lẩu vào 12:00 Thứ 5, 14 thg 1 trong Hội bạn.',
+      );
+      const [email] = (await emailsTo(dung)).filter((e) => e.subject.includes('Lẩu'));
+      expect(email?.subject.replace(/\s/gu, ' ')).toBe(created?.text);
+      expect(email?.text).toMatch(/^Chào Dũng,/u);
+      expect(email?.html).toContain('<html lang="vi">');
+
+      // The feed is written when it's read, so switching language rewrites it.
+      await as(app, dung)
+        .patch('/v1/me')
+        .send({ locale: 'en', timeZone: 'Asia/Ho_Chi_Minh' })
+        .expect(200);
+      const [again] = (await feed(dung)).items.filter((n) => n.type === 'event.created');
+      expect(again?.text).toBe('An Owner planned Lẩu for Thu, Jan 14, 7:00 PM in Hội bạn.');
     });
   });
 });

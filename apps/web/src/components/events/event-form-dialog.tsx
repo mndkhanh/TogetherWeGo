@@ -2,6 +2,7 @@ import { createEventSchema, type EventDetailResponse, updateEventSchema } from "
 import * as React from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -69,6 +70,7 @@ export function EventFormDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useTranslation()
   const [state, setState] = React.useState(() => initialState(event))
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [formError, setFormError] = React.useState<string | null>(null)
@@ -105,14 +107,14 @@ export function EventFormDialog({
     e.preventDefault()
     const errors: FieldErrors = {}
     const startsAt = fromLocalInputs(state.date, state.startTime)
-    if (!startsAt) errors.startsAt = "Choose a date and start time"
+    if (!startsAt) errors.startsAt = t("eventForm.chooseStart")
     let endsAt: string | null = null
     if (state.endTime) {
       // An end time on its own means the same day as the start.
       endsAt = fromLocalInputs(state.endDate || state.date, state.endTime)
-      if (!endsAt) errors.endsAt = "Enter a valid end time"
+      if (!endsAt) errors.endsAt = t("eventForm.validEnd")
     } else if (state.endDate) {
-      errors.endsAt = "Add an end time, or clear the end date"
+      errors.endsAt = t("eventForm.addEndTime")
     }
 
     const candidate = {
@@ -133,11 +135,11 @@ export function EventFormDialog({
     try {
       if (event) {
         await update.mutateAsync(candidate as typeof candidate & { version: number })
-        toast.success("Event updated")
+        toast.success(t("eventForm.updated"))
         onOpenChange(false)
       } else {
         const created = await create.mutateAsync(candidate)
-        toast.success(`${created.title} planned`)
+        toast.success(t("eventForm.planned", { title: created.title }))
         onOpenChange(false)
         void navigate(`/groups/${groupId}/events/${created.id}`)
       }
@@ -154,11 +156,9 @@ export function EventFormDialog({
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
           <DialogHeader>
-            <DialogTitle>{event ? "Edit event" : "Plan an event"}</DialogTitle>
+            <DialogTitle>{event ? t("eventForm.editTitle") : t("eventForm.planTitle")}</DialogTitle>
             <DialogDescription>
-              {event
-                ? "Everyone in the group sees the change."
-                : "Everyone in the group can see it and say if they’re coming."}
+              {event ? t("eventForm.editHint") : t("eventForm.planHint")}
             </DialogDescription>
           </DialogHeader>
 
@@ -170,11 +170,11 @@ export function EventFormDialog({
 
           <FieldGroup>
             <Field data-invalid={invalid("title")}>
-              <FieldLabel htmlFor="event-title">What’s happening</FieldLabel>
+              <FieldLabel htmlFor="event-title">{t("eventForm.what")}</FieldLabel>
               <Input
                 id="event-title"
                 value={state.title}
-                placeholder="Hotpot night"
+                placeholder={t("eventForm.titlePlaceholder")}
                 autoFocus
                 aria-invalid={invalid("title")}
                 onChange={(e) => set("title", e.target.value)}
@@ -183,7 +183,7 @@ export function EventFormDialog({
             </Field>
 
             <Field data-invalid={invalid("startsAt")}>
-              <FieldLabel htmlFor="event-date">Starts</FieldLabel>
+              <FieldLabel htmlFor="event-date">{t("eventForm.starts")}</FieldLabel>
               <div className="grid grid-cols-[3fr_2fr] gap-3">
                 <Input
                   id="event-date"
@@ -195,7 +195,7 @@ export function EventFormDialog({
                 <Input
                   id="event-start-time"
                   type="time"
-                  aria-label="Start time"
+                  aria-label={t("eventForm.startTime")}
                   value={state.startTime}
                   aria-invalid={invalid("startsAt")}
                   onChange={(e) => set("startTime", e.target.value)}
@@ -205,12 +205,12 @@ export function EventFormDialog({
             </Field>
 
             <Field data-invalid={invalid("endsAt")}>
-              <FieldLabel htmlFor="event-end-time">Ends (optional)</FieldLabel>
+              <FieldLabel htmlFor="event-end-time">{t("eventForm.ends")}</FieldLabel>
               <div className="grid grid-cols-[3fr_2fr] gap-3">
                 <Input
                   id="event-end-date"
                   type="date"
-                  aria-label="End date"
+                  aria-label={t("eventForm.endDate")}
                   value={state.endDate}
                   min={state.date}
                   aria-invalid={invalid("endsAt")}
@@ -224,16 +224,16 @@ export function EventFormDialog({
                   onChange={(e) => set("endTime", e.target.value)}
                 />
               </div>
-              <FieldDescription>Leave the date empty if it ends the same day.</FieldDescription>
+              <FieldDescription>{t("eventForm.endHint")}</FieldDescription>
               <FieldError>{fieldErrors.endsAt}</FieldError>
             </Field>
 
             <Field data-invalid={invalid("location")}>
-              <FieldLabel htmlFor="event-location">Where (optional)</FieldLabel>
+              <FieldLabel htmlFor="event-location">{t("eventForm.where")}</FieldLabel>
               <Input
                 id="event-location"
                 value={state.location}
-                placeholder="Lẩu Phan, 12 Lê Lợi"
+                placeholder={t("eventForm.wherePlaceholder")}
                 aria-invalid={invalid("location")}
                 onChange={(e) => set("location", e.target.value)}
               />
@@ -241,7 +241,7 @@ export function EventFormDialog({
             </Field>
 
             <Field data-invalid={invalid("description")}>
-              <FieldLabel htmlFor="event-description">Details (optional)</FieldLabel>
+              <FieldLabel htmlFor="event-description">{t("eventForm.details")}</FieldLabel>
               <Textarea
                 id="event-description"
                 value={state.description}
@@ -256,7 +256,7 @@ export function EventFormDialog({
           <DialogFooter>
             <Button type="submit" disabled={pending}>
               {pending && <Spinner data-icon="inline-start" />}
-              {event ? "Save changes" : "Plan event"}
+              {event ? t("common.saveChanges") : t("eventForm.plan")}
             </Button>
           </DialogFooter>
         </form>

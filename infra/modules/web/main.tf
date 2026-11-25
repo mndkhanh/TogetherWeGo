@@ -23,6 +23,12 @@ variable "upload_origins" {
   default     = []
 }
 
+variable "web_acl_arn" {
+  description = "WAF web ACL (scope CLOUDFRONT, in us-east-1) to attach; null for none"
+  type        = string
+  default     = null
+}
+
 variable "price_class" {
   description = "PriceClass_200 includes edge locations in Vietnam and Southeast Asia"
   type        = string
@@ -172,6 +178,7 @@ resource "aws_cloudfront_distribution" "this" {
   default_root_object = "index.html"
   price_class         = var.price_class
   http_version        = "http2and3"
+  web_acl_id          = var.web_acl_arn
 
   origin {
     origin_id                = "web"

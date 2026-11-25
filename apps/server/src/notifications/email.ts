@@ -1,3 +1,5 @@
+import type { Locale } from '@twg/shared';
+
 /** One email, ready to send. Built by the fan-out, sent by the email job. */
 export interface OutgoingEmail {
   to: string;
@@ -22,34 +24,55 @@ export function toSubject(text: string): string {
   return line.length > 90 ? `${line.slice(0, 89)}…` : line;
 }
 
+const COPY: Record<
+  Locale,
+  { hi: string; open: string; textFooter: string; htmlFooter: [string, string] }
+> = {
+  en: {
+    hi: 'Hi',
+    open: 'Open in TogetherWeGo',
+    textFooter: 'You get this email because of your notification settings:',
+    htmlFooter: ['You get this email because of your', 'notification settings'],
+  },
+  vi: {
+    hi: 'Chào',
+    open: 'Mở trong TogetherWeGo',
+    textFooter: 'Bạn nhận được email này theo cài đặt thông báo của bạn:',
+    htmlFooter: ['Bạn nhận được email này theo', 'cài đặt thông báo của bạn'],
+  },
+};
+
+/** One notification as an email, in the recipient's language. */
 export function renderNotificationEmail(input: {
   to: string;
   name: string;
+  locale?: Locale;
   text: string;
   /** Absolute URL into the app. */
   url: string;
   settingsUrl: string;
 }): OutgoingEmail {
   const { text, url, settingsUrl } = input;
+  const copy = COPY[input.locale ?? 'en'];
   return {
     to: input.to,
     subject: toSubject(text),
     text: [
-      `Hi ${input.name},`,
+      `${copy.hi} ${input.name},`,
       '',
       text,
       '',
-      `Open it: ${url}`,
+      `${copy.open}: ${url}`,
       '',
-      `You get this email because of your notification settings: ${settingsUrl}`,
+      `${copy.textFooter} ${settingsUrl}`,
     ].join('\n'),
     html: `<!doctype html>
-<html><body style="font-family: system-ui, sans-serif; color: #1f2933; line-height: 1.5">
-  <p>Hi ${escapeHtml(input.name)},</p>
+<html lang="${input.locale ?? 'en'}"><body style="font-family: system-ui, sans-serif; color: #1f2933; line-height: 1.5">
+  <p>${copy.hi} ${escapeHtml(input.name)},</p>
   <p style="font-size: 16px">${escapeHtml(text)}</p>
-  <p><a href="${escapeHtml(url)}" style="color: #2352d1; font-weight: 600">Open in TogetherWeGo</a></p>
-  <p style="color: #6b7280; font-size: 13px">You get this email because of your
-    <a href="${escapeHtml(settingsUrl)}" style="color: #6b7280">notification settings</a>.</p>
+  <p><a href="${escapeHtml(url)}" style="color: #2352d1; font-weight: 600">${copy.open}</a></p>
+  <p style="color: #6b7280; font-size: 13px">${copy.htmlFooter[0]}
+    <a href="${escapeHtml(settingsUrl)}" style="color: #6b7280">${copy.htmlFooter[1]}</a>.</p>
 </body></html>`,
   };
 }

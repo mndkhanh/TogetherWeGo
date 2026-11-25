@@ -5,6 +5,7 @@ import type { AppConfig } from './infra/config/env.schema.js';
 import { LoggerModule } from './infra/logger/logger.module.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { RedisModule } from './infra/redis/redis.module.js';
+import { BacklogService } from './jobs/backlog.service.js';
 import { EmailProcessor, NotificationsProcessor } from './jobs/notifications.processor.js';
 import { bullRootOptions, QUEUES } from './jobs/queues.js';
 import { RemindersProcessor } from './jobs/reminders.processor.js';
@@ -31,6 +32,12 @@ import { RemindersModule } from './reminders/reminders.module.js';
     NotificationsCoreModule,
     RemindersModule,
   ],
-  providers: [SystemProcessor, NotificationsProcessor, EmailProcessor, RemindersProcessor],
+  providers: [
+    BacklogService,
+    SystemProcessor,
+    NotificationsProcessor,
+    EmailProcessor,
+    RemindersProcessor,
+  ],
 })
 export class WorkerModule {}

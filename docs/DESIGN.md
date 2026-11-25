@@ -1,6 +1,6 @@
 # TogetherWeGo — Product & Architecture Draft
 
-> Status: **v0.9** (2026-11-26). Phases 0 (skeleton), 1 (groups), 2 (expenses), 3 (settle up), 4 (events), 5 (notifications) and 6 (reminders) are built; see the README for running it. Later phases are still a draft.
+> Status: **v1.0** (2026-11-26). Phases 0 to 7 are built: skeleton, groups, expenses, settle up, events, notifications, reminders, and polish (Vietnamese/English, installable app, production hardening); see the README for running it. Later phases are still a draft.
 > Changes from v0.1: payments via **SePay**; **non-serverless** architecture (long-running containers on ECS/EC2 + RDS Postgres + Redis).
 
 ## 1. What it is
@@ -87,7 +87,7 @@ One **NestJS** codebase runs as two long-lived processes: `api` (HTTP + WebSocke
 | Secrets | **Secrets Manager** | DB password, JWT keys, SePay keys/tokens |
 | IaC | **Terraform** (or AWS CDK) | Stacks: network, data, compute, web |
 | CI/CD | **GitHub Actions** | Build image → push to ECR → run migration task → rolling ECS deploy |
-| Observability | CloudWatch Logs + Container Insights, pino logs, alarms on 5xx / queue backlog / DB CPU | Sentry optional |
+| Observability | CloudWatch Logs + Container Insights, pino logs, CloudWatch alarms emailed through SNS (see §9) | Sentry optional |
 | Local dev | **docker compose**: postgres, redis, mailpit, minio | Same code, no AWS needed locally |
 
 ### Network & cost notes
@@ -247,6 +247,13 @@ Guards: `JwtAuthGuard` everywhere except auth and webhooks. `GroupMemberGuard` a
 
 Notification types: `group.member_joined`, `event.created`, `event.updated`, `event.cancelled`, `event.commented`, `event.reminder`, `expense.added`, `expense.updated`, `expense.deleted`, `settlement.requested`, `settlement.confirmed`, `settlement.cancelled`, `debt.reminder`, `transfer.unmatched`. Both reminder types are on in the app and by email by default, and can be turned off like any other.
 
+### Language, time zones and the installable app
+
+- **Languages:** English and Vietnamese. Each user has a `locale` (`en`/`vi`, CHECK constraint) and an IANA `time_zone` (validated by the API; default `Asia/Ho_Chi_Minh`). Both are set at sign-up from the screen's language and the device's time zone (also for Google sign-up, through the OAuth state cookie) and can be changed in settings.
+- **Notifications** store facts, not sentences: the text is written when it's read (feed, live push, email) in the reader's language, with times in their time zone. Switching language rewrites the whole feed. Amounts keep their currency's format whatever the language.
+- **Web:** `i18next` with typed keys (`en.json` is the source; `vi.json` must have the same keys and placeholders, checked at compile time and by `pnpm --filter @twg/web check:i18n` in CI). The API and shared zod schemas speak English; the web app translates their messages through one lookup table (`apps/web/src/i18n/messages.ts`), falling back to the English.
+- **PWA:** `vite-plugin-pwa` (Workbox) precaches only the app shell: HTML, JS, CSS, fonts, icons. Nothing under `/v1` is ever cached or served by the service worker (money, balances and anything personal always come from the API), and receipts and QR codes go straight to the network. A new version waits for the person to reload (a toast offers it), so a half-filled form is never lost. The deploy marks everything outside `assets/` as `no-cache`, so installed apps see new versions.
+
 ## 7. Payments with SePay
 
 SePay watches a bank account and sends a webhook for each incoming transfer. It also generates VietQR images (`https://qr.sepay.vn/img?acc=<acct>&bank=<bank>&amount=<amount>&des=<content>`), which any Vietnamese banking app can scan.
@@ -315,8 +322,9 @@ TogetherWeGo/
 - Authorization in guards. Every group-scoped query is filtered by membership.
 - Private subnets for ECS, RDS and Redis. Security groups allow only ALB → api, and api/worker → RDS/Redis.
 - Least-privilege IAM task roles (S3 bucket prefix, SES send, specific secrets).
-- Rate limiting via `@nestjs/throttler` with Redis storage. Add WAF on ALB/CloudFront later.
-- RDS automated backups and point-in-time recovery. Deletion protection in prod.
+- Rate limiting via `@nestjs/throttler` in the app, and AWS WAF on CloudFront in front of it (prod; optional in dev): per-IP rate limits (100 requests / 5 min on `/v1/auth/`, 2000 on `/v1/`), the AWS IP reputation list, the common rule set and known bad inputs. WAF logs redact the `authorization`, `cookie` and `x-origin-verify` headers.
+- Alarms (`infra/modules/monitoring`), emailed through SNS when they fire and clear: API 5xx, load balancer 5xx, unhealthy API tasks, slow API (p95), fewer ECS tasks than desired, Postgres CPU / storage / memory, Valkey CPU / memory, and four from the worker. The worker logs a `Worker heartbeat` line every minute with what it owes, counted from the database: outbox rows waiting over 5 minutes, outbox rows and emails given up on, event reminders over 5 minutes late. Log metric filters turn those into metrics; a missing heartbeat is its own alarm (`worker-silent`).
+- RDS automated backups and point-in-time recovery. Prod (`infra/envs/prod`): Multi-AZ Postgres with deletion protection, 14 days of backups and Performance Insights; Valkey with a replica in a second AZ and automatic failover; 2+ EC2 instances, 2 API tasks and 2 workers (every job is safe to run on several workers); 90 days of logs.
 - Unit tests for money math (splits, rounding remainders, simplification). These must be bulletproof.
 - Integration tests with Testcontainers (Postgres + Redis). Playwright for the main web flows.
 - CI: lint, test, build image. Deploy `dev` on main and `prod` on tag.
@@ -332,7 +340,7 @@ TogetherWeGo/
 | 4. Events ✅ | Events, RSVP, comments, cancel/reschedule, link expenses to events |
 | 5. Notifications ✅ | Outbox → BullMQ → in-app feed + Socket.IO + email (SES / Mailpit), preferences |
 | 6. Reminders ✅ | Event reminders (24 h and 1 h before; delayed jobs + sweep), weekly debt reminders (job scheduler, 6-day cooldown) |
-| 7. Polish | i18n (vi/en), PWA, prod hardening (Multi-AZ, alarms, WAF) |
+| 7. Polish ✅ | Vietnamese and English (web, emails, notifications; per-user language and time zone), installable PWA, prod environment (Multi-AZ, replica, WAF, alarms) |
 
 ## 11. Open questions
 
