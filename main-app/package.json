@@ -1,0 +1,28 @@
+{
+  "name": "togetherwego",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.23.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @twg/server --filter @twg/web dev",
+    "dev:worker": "pnpm --filter @twg/server dev:worker",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "oxlint apps packages",
+    "test": "pnpm -r test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker compose -f docker/docker-compose.yml up -d",
+    "db:down": "docker compose -f docker/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @twg/server prisma:migrate"
+  },
+  "devDependencies": {
+    "oxlint": "^1.94.0",
+    "prettier": "^3.10.1",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "typescript": "~6.0.3"
+  }
+}

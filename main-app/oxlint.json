@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "import", "react"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "typescript/consistent-type-imports": "off",
+    "unicorn/no-null": "off"
+  },
+  "ignorePatterns": ["**/dist/**", "**/generated/**", "**/*.gen.ts"]
+}

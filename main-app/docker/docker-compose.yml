@@ -1,0 +1,56 @@
+# Local development stack. Start with `pnpm db:up` from the repo root.
+# Mirrors AWS: Postgres (RDS), Valkey/Redis (ElastiCache), Mailpit (SES), RustFS (S3).
+name: togetherwego
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: twg
+      POSTGRES_PASSWORD: twg
+      POSTGRES_DB: togetherwego
+    ports:
+      - '127.0.0.1:${TWG_POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U twg -d togetherwego']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8-alpine
+    ports:
+      - '127.0.0.1:${TWG_REDIS_PORT:-6380}:6379'
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Catches all outgoing email locally. UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+
+  # S3-compatible storage for receipt photos (stands in for the private S3 bucket).
+  # RustFS, because the MinIO images are no longer published. The API creates the
+  # bucket on startup when S3_ENDPOINT is set (local only). Console: http://localhost:9001
+  s3:
+    image: rustfs/rustfs:1.0.6
+    environment:
+      RUSTFS_ACCESS_KEY: twg
+      RUSTFS_SECRET_KEY: twg-local-only
+      RUSTFS_CONSOLE_ENABLE: 'true'
+    ports:
+      - '127.0.0.1:${TWG_S3_PORT:-9000}:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - s3-data:/data
+
+volumes:
+  postgres-data:
+  s3-data:

@@ -1,0 +1,113 @@
+name: CI
+
+# The main app lives in main-app/; the Supabase demo has its own workflow (demo-ci.yml).
+on:
+  pull_request:
+    paths: ['main-app/**', '.github/workflows/ci.yml']
+  push:
+    branches: [main]
+    paths: ['main-app/**', '.github/workflows/ci.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: main-app
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: twg
+          POSTGRES_PASSWORD: twg
+          POSTGRES_DB: togetherwego
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U twg" --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: valkey/valkey:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+      s3:
+        image: rustfs/rustfs:1.0.6
+        env:
+          RUSTFS_ACCESS_KEY: twg
+          RUSTFS_SECRET_KEY: twg-local-only
+        ports: ['9000:9000']
+
+    env:
+      DATABASE_URL: postgresql://twg:twg@localhost:5432/togetherwego
+      REDIS_URL: redis://localhost:6379
+      APP_ORIGIN: http://localhost:5173
+      JWT_ACCESS_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+      COOKIE_SECURE: 'false'
+      LOG_LEVEL: warn
+      # Local S3 emulator credentials (not secrets)
+      RECEIPTS_BUCKET: twg-receipts
+      S3_ENDPOINT: http://localhost:9000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: twg
+      AWS_SECRET_ACCESS_KEY: twg-local-only
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: main-app/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: main-app/.nvmrc
+          cache: pnpm
+          cache-dependency-path: main-app/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm --filter @twg/web check:i18n
+      - run: pnpm --filter @twg/shared build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: E2E tests (API against Postgres + Redis + S3 emulator)
+        run: |
+          pnpm --filter @twg/server prisma:deploy
+          pnpm --filter @twg/server test:e2e
+      - run: pnpm build
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: main-app
+          file: main-app/docker/server.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  terraform:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive main-app/infra
+      - run: terraform -chdir=main-app/infra/envs/dev init -backend=false -input=false
+      - run: terraform -chdir=main-app/infra/envs/dev validate
+      - run: terraform -chdir=main-app/infra/envs/prod init -backend=false -input=false
+      - run: terraform -chdir=main-app/infra/envs/prod validate

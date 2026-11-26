@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and adjust.
+github_repository = "mndkhanh/TogetherWeGo"
+
+# Optional Google sign-in. Authorized redirect URI: https://<cloudfront-domain>/v1/auth/google/callback
+# google_client_id     = ""
+# google_client_secret = ""   # better: export TF_VAR_google_client_secret instead of writing it to a file
+
+# CloudWatch alarms by email (each address confirms an SNS subscription first).
+# alarm_emails = ["you@example.com"]
