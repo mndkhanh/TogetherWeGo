@@ -1,0 +1,7 @@
+dist
+pnpm-lock.yaml
+.emulator-data
+.firebase
+functions/lib
+functions/node_modules
+functions/package-lock.json

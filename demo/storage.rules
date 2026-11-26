@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// Expense photos (receipts, bills): groups/{groupId}/expenses/{expenseId}/{file}.
+//
+// Only members of the group see them. They're uploaded just before the expense is saved (the
+// expense lists their names; see firestore.rules), and can't be added or swapped afterwards, like
+// the rest of an expense. Whoever added the expense removes them with it.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function member(groupId) {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function expensePath(groupId, expenseId) {
+      return /databases/(default)/documents/groups/$(groupId)/expenses/$(expenseId);
+    }
+
+    match /groups/{groupId}/expenses/{expenseId}/{file} {
+      allow read: if member(groupId);
+
+      // Small images only (the app shrinks photos to well under this before uploading).
+      allow create: if member(groupId)
+        && !firestore.exists(expensePath(groupId, expenseId))
+        && file.matches('^[a-z0-9-]{1,40}[.](jpg|png|webp)$')
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+
+      allow delete: if member(groupId)
+        && (!firestore.exists(expensePath(groupId, expenseId))
+          || firestore.get(expensePath(groupId, expenseId)).data.createdBy == request.auth.uid);
+
+      allow update: if false;
+    }
+
+    // Profile photos: avatars/{uid}/avatar-xxxx.jpg. Only you add or remove yours; anyone signed
+    // in may see it (it's on your member card in every group you're in). The app crops it to a
+    // small square JPEG, and saves a new file each time so nobody sees a stale cached one.
+    match /avatars/{userId}/{file} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == userId
+        && file.matches('^[a-z0-9-]{1,40}[.]jpg$')
+        && request.resource.size < 512 * 1024
+        && request.resource.contentType == 'image/jpeg';
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow update: if false;
+    }
+
+    match /{everythingElse=**} {
+      allow read, write: if false;
+    }
+  }
+}

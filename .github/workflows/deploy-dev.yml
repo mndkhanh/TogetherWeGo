@@ -48,8 +48,8 @@ jobs:
       - name: Build and push server image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: docker/server.Dockerfile
+          context: main-app
+          file: main-app/docker/server.Dockerfile
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMAGE }}
@@ -63,20 +63,25 @@ jobs:
           ECS_API_FAMILY: ${{ vars.ECS_API_FAMILY }}
           ECS_WORKER_FAMILY: ${{ vars.ECS_WORKER_FAMILY }}
           ECS_MIGRATE_FAMILY: ${{ vars.ECS_MIGRATE_FAMILY }}
-        run: bash scripts/deploy-ecs.sh
+        run: bash main-app/scripts/deploy-ecs.sh
 
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: main-app/package.json
       - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version-file: main-app/.nvmrc
           cache: pnpm
+          cache-dependency-path: main-app/pnpm-lock.yaml
       - name: Build web app
+        working-directory: main-app
         run: |
           pnpm install --frozen-lockfile --filter @twg/web...
           pnpm --filter @twg/shared build
           pnpm --filter @twg/web build
 
       - name: Upload web app and invalidate CDN
+        working-directory: main-app
         env:
           WEB_BUCKET: ${{ vars.WEB_BUCKET }}
           DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}

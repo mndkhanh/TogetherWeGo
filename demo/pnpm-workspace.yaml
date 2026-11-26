@@ -1,0 +1,3 @@
+overrides:
+  # Firestore SDK pulls an older grpc-js (Node only, not in the browser bundle): GHSA-f596-whhp-79r4.
+  "@grpc/grpc-js": ">=1.13.6"

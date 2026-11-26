@@ -1,0 +1,155 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/be-vietnam-pro/400.css";
+@import "@fontsource/be-vietnam-pro/500.css";
+@import "@fontsource/be-vietnam-pro/600.css";
+@import "@fontsource/be-vietnam-pro/800.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --color-stool-red: var(--stool-red);
+  --color-stool-yellow: var(--stool-yellow);
+  --color-stool-cream: var(--stool-cream);
+  --color-stool-deep: var(--stool-deep);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * TogetherWeGo palette: the red plastic stool of a Vietnamese sidewalk hangout (the app icon),
+ * under the warm yellow light of a street stall.
+ *   Stool red    #E0483B  the icon itself, illustrations and highlights
+ *   Action red   #C2352A  buttons and links (deep enough for white text)
+ *   Stall light  #FFFAEB  page background, a pale warm white
+ *   Marigold     #F4C13D  plans, highlights, the sign-in panel
+ *   Ink          #2B1B15  text, a warm near-black
+ */
+:root {
+  --stool-red: #e0483b;
+  --stool-yellow: #f4c13d;
+  --stool-cream: #fffbef;
+  --stool-deep: #8e2219;
+  --background: #fffaeb;
+  --foreground: #2b1b15;
+  --card: #fffdf7;
+  --card-foreground: #2b1b15;
+  --popover: #ffffff;
+  --popover-foreground: #2b1b15;
+  --primary: #c2352a;
+  --primary-foreground: #ffffff;
+  --secondary: #f9ecc8;
+  --secondary-foreground: #2b1b15;
+  --muted: #f8efd6;
+  --muted-foreground: #73574a;
+  --accent: #fcdfd3;
+  --accent-foreground: #2b1b15;
+  --destructive: #a1261c;
+  --border: #ecdfbd;
+  --input: #dfcd9d;
+  --ring: #c2352a;
+  --chart-1: #c2352a;
+  --chart-2: #f4c13d;
+  --chart-3: #3f8f6b;
+  --chart-4: #8e2219;
+  --chart-5: #73574a;
+  --radius: 0.75rem;
+  --sidebar: #f8efd6;
+  --sidebar-foreground: #2b1b15;
+  --sidebar-primary: #c2352a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #fcdfd3;
+  --sidebar-accent-foreground: #2b1b15;
+  --sidebar-border: #ecdfbd;
+  --sidebar-ring: #c2352a;
+}
+
+/* After dark: the same stall, lit by a bare bulb. */
+.dark {
+  --stool-red: #f0675b;
+  --stool-yellow: #f4c13d;
+  --stool-cream: #fbefd9;
+  --stool-deep: #8e2219;
+  --background: #1d1411;
+  --foreground: #fbefd9;
+  --card: #271b16;
+  --card-foreground: #fbefd9;
+  --popover: #271b16;
+  --popover-foreground: #fbefd9;
+  --primary: #f0675b;
+  --primary-foreground: #1d1411;
+  --secondary: #3a2a1c;
+  --secondary-foreground: #fbefd9;
+  --muted: #2f221c;
+  --muted-foreground: #c4ab95;
+  --accent: #4a2620;
+  --accent-foreground: #fbefd9;
+  --destructive: #ff8a7a;
+  --border: #43312a;
+  --input: #55403a;
+  --ring: #f0675b;
+  --chart-1: #f0675b;
+  --chart-2: #f4c13d;
+  --chart-3: #5fb38d;
+  --chart-4: #c4ab95;
+  --chart-5: #8f7766;
+  --sidebar: #271b16;
+  --sidebar-foreground: #fbefd9;
+  --sidebar-primary: #f0675b;
+  --sidebar-primary-foreground: #1d1411;
+  --sidebar-accent: #4a2620;
+  --sidebar-accent-foreground: #fbefd9;
+  --sidebar-border: #43312a;
+  --sidebar-ring: #f0675b;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

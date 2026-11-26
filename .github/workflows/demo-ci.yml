@@ -1,0 +1,51 @@
+name: Demo CI
+
+# The Firebase demo in demo/. Security rules are tested against the Firestore emulator.
+on:
+  pull_request:
+    paths: ['demo/**', '.github/workflows/demo-ci.yml']
+  push:
+    branches: [main]
+    paths: ['demo/**', '.github/workflows/demo-ci.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  demo:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: demo/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: demo/.nvmrc
+          cache: pnpm
+          cache-dependency-path: |
+            demo/pnpm-lock.yaml
+            demo/functions/package-lock.json
+      # The Firestore emulator runs on Java.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix functions
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:rules
+      - run: pnpm test:payments
+      - run: pnpm build
