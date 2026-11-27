@@ -88,6 +88,12 @@ export function ExpensesTab({ groupId, members }: { groupId: string; members: Me
               const myShare = expenseShares(e).get(user.uid) ?? 0
               const payer =
                 e.paidBy === user.uid ? "You" : (names.get(e.paidBy) ?? "A former member")
+              const addedBy =
+                e.createdBy === e.paidBy
+                  ? null
+                  : e.createdBy === user.uid
+                    ? "you"
+                    : (names.get(e.createdBy) ?? "a former member")
               return (
                 <li key={e.id} className="flex items-start gap-3 py-3">
                   <Avatar name={names.get(e.paidBy) ?? "?"} uid={e.paidBy} photo={photos.get(e.paidBy)} />
@@ -106,6 +112,7 @@ export function ExpensesTab({ groupId, members }: { groupId: string; members: Me
                         month: "short",
                       })}
                     </p>
+                    {addedBy && <p className="text-xs text-muted">Added by {addedBy}</p>}
                     {e.eventId && (
                       <p className="mt-1 flex items-center gap-1 text-xs text-muted">
                         <CalendarDays className="size-3.5 shrink-0" aria-hidden />
@@ -126,7 +133,7 @@ export function ExpensesTab({ groupId, members }: { groupId: string; members: Me
                       </p>
                     )}
                   </div>
-                  {e.createdBy === user.uid && (
+                  {(e.createdBy === user.uid || e.paidBy === user.uid) && (
                     <Button
                       variant="danger"
                       size="sm"
@@ -146,6 +153,9 @@ export function ExpensesTab({ groupId, members }: { groupId: string; members: Me
     </div>
   )
 }
+
+const selectClass =
+  "h-11 w-full rounded-xl bg-surface px-3 text-sm ring-1 ring-line focus:ring-2 focus:ring-brand focus:outline-none"
 
 const SPLIT_MODES: { id: SplitKind; label: string }[] = [
   { id: "equal", label: "Equally" },
@@ -238,6 +248,7 @@ function AddExpense({
   const [description, setDescription] = React.useState("")
   const [amountText, setAmountText] = React.useState("")
   const [spentOn, setSpentOn] = React.useState(today)
+  const [paidBy, setPaidBy] = React.useState(user.uid)
   const [excluded, setExcluded] = React.useState<Set<string>>(new Set())
   const [mode, setMode] = React.useState<SplitKind>("equal")
   const [shareCounts, setShareCounts] = React.useState<Record<string, number>>({})
@@ -277,7 +288,7 @@ function AddExpense({
           {
             description,
             amount,
-            paidBy: user.uid,
+            paidBy: members.some((m) => m.uid === paidBy) ? paidBy : user.uid,
             participants: split.participants,
             split: mode,
             weights: split.weights,
@@ -293,6 +304,7 @@ function AddExpense({
     if (ok) {
       setDescription("")
       setAmountText("")
+      setPaidBy(user.uid)
       setExcluded(new Set())
       setMode("equal")
       setShareCounts({})
@@ -320,7 +332,24 @@ function AddExpense({
           <AmountField value={amountText} onChange={setAmountText} />
         </div>
         <div className="grid gap-4 @md:grid-cols-2">
-          <Field label="Date" hint="You paid. If someone else did, ask them to add it.">
+          <Field label="Paid by">
+            <select
+              value={paidBy}
+              onChange={(e) => setPaidBy(e.target.value)}
+              className={selectClass}
+            >
+              <option value={user.uid}>You</option>
+              {members
+                .filter((m) => m.uid !== user.uid)
+                .map((m) => (
+                  <option key={m.uid} value={m.uid}>
+                    {m.name}
+                    {m.altName ? ` (${m.altName})` : ""}
+                  </option>
+                ))}
+            </select>
+          </Field>
+          <Field label="Date">
             <Input
               type="date"
               value={spentOn}
@@ -333,7 +362,7 @@ function AddExpense({
               <select
                 value={eventId}
                 onChange={(e) => setEventId(e.target.value)}
-                className="h-11 w-full rounded-xl bg-surface px-3 text-sm ring-1 ring-line focus:ring-2 focus:ring-brand focus:outline-none"
+                className={selectClass}
               >
                 <option value="">No plan</option>
                 {planOptions.map((ev) => (

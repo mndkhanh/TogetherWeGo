@@ -377,10 +377,10 @@ describe("expenses and payments", () => {
     await assertFails(add(expense("binh", { amount: 0 })))
     await assertFails(add(expense("binh", { amount: 12.5 })))
     await assertFails(add(expense("binh", { amount: "300000" })))
+    // The payer can be anyone in the group, but not an outsider.
     await assertFails(add(expense("binh", { paidBy: "mallory" })))
-    // Nobody can say someone else paid: that would invent a debt to them (and, with it, a
-    // way to see their bank account).
-    await assertFails(add(expense("binh", { paidBy: "an" })))
+    await assertFails(add(expense("binh", { paidBy: "ghost" })))
+    await assertSucceeds(add(expense("binh", { paidBy: "an" })))
     await assertFails(add(expense("binh", { participants: [] })))
     await assertFails(add(expense("binh", { participants: ["an", "an"] })))
     // Everyone in the split must be in the group.
@@ -412,12 +412,19 @@ describe("expenses and payments", () => {
     await assertFails(add(expense("binh", { reference: "x".repeat(301) })))
   })
 
-  it("lets only the creator delete an expense, and nobody edit one", async () => {
+  it("lets only the creator or the payer delete an expense, and nobody edit one", async () => {
     await seed()
     const ref = await addDoc(collection(as("binh"), "groups/g1/expenses"), expense("binh"))
     await assertFails(updateDoc(doc(as("binh"), ref.path), { amount: 1 }))
     await assertFails(deleteDoc(doc(as("an"), ref.path)))
     await assertSucceeds(deleteDoc(doc(as("binh"), ref.path)))
+    // Added by Binh, saying An paid: either of them can delete it.
+    const forAn = await addDoc(
+      collection(as("binh"), "groups/g1/expenses"),
+      expense("binh", { paidBy: "an" }),
+    )
+    await assertFails(deleteDoc(doc(as("mallory"), forAn.path)))
+    await assertSucceeds(deleteDoc(doc(as("an"), forAn.path)))
   })
 
   it("records a cash payment only by the person who was paid", async () => {

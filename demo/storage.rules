@@ -4,7 +4,8 @@ rules_version = '2';
 //
 // Only members of the group see them. They're uploaded just before the expense is saved (the
 // expense lists their names; see firestore.rules), and can't be added or swapped afterwards, like
-// the rest of an expense. Whoever added the expense removes them with it.
+// the rest of an expense. Whoever can delete the expense (who added it, or its payer) removes
+// them with it.
 service firebase.storage {
   match /b/{bucket}/o {
     function member(groupId) {
@@ -28,7 +29,8 @@ service firebase.storage {
 
       allow delete: if member(groupId)
         && (!firestore.exists(expensePath(groupId, expenseId))
-          || firestore.get(expensePath(groupId, expenseId)).data.createdBy == request.auth.uid);
+          || firestore.get(expensePath(groupId, expenseId)).data.createdBy == request.auth.uid
+          || firestore.get(expensePath(groupId, expenseId)).data.paidBy == request.auth.uid);
 
       allow update: if false;
     }

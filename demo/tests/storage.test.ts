@@ -46,10 +46,11 @@ const upload = (uid: string, opts: { name?: string; type?: string; bytes?: Uint8
     contentType: opts.type ?? "image/jpeg",
   })
 
-async function saveExpense(createdBy: string) {
+async function saveExpense(createdBy: string, paidBy = createdBy) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), "groups/g1/expenses/e1"), {
       createdBy,
+      paidBy,
       photos: ["photo-1.jpg"],
     })
   })
@@ -81,6 +82,12 @@ describe("expense photos", () => {
     await assertFails(upload("binh"))
     await assertFails(deleteObject(photo("an")))
     await assertSucceeds(deleteObject(photo("binh")))
+  })
+
+  it("lets the payer remove the photos of an expense someone else added for them", async () => {
+    await upload("binh")
+    await saveExpense("binh", "an")
+    await assertSucceeds(deleteObject(photo("an")))
   })
 })
 
