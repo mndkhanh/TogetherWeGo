@@ -143,6 +143,58 @@ afterAll(async () => {
   await Promise.all(apps.map((a) => deleteApp(a)))
 })
 
+/** Waits (up to 15 s) for the server's recount to say what `check` wants. */
+async function balancesOf(c: Client, id: string, check: (d: Record<string, unknown>) => boolean) {
+  const until = Date.now() + 15_000
+  for (;;) {
+    const d = (await getDoc(doc(c.db, "groups", id, "summary", "balances"))).data()
+    if (d && check(d)) return d
+    if (Date.now() > until) throw new Error(`balances never matched: ${JSON.stringify(d)}`)
+    await new Promise((r) => setTimeout(r, 300))
+  }
+}
+
+describe("running balances", () => {
+  it("are counted by the server when money changes, and only it writes them", async () => {
+    const id = `g3-${stamp}`
+    await makeGroup(id, "PAYTESTC", an, [binh])
+    await addExpense(an, id, 300_000, [an.uid, binh.uid])
+    let d = await balancesOf(an, id, (d) => d.expenseCount === 1)
+    expect(d.net).toEqual({ [an.uid]: 150_000, [binh.uid]: -150_000 })
+    expect(d.spent).toEqual({ [an.uid]: 150_000, [binh.uid]: 150_000 })
+
+    // Bình records what An paid for him; then pays An back in cash.
+    await addDoc(collection(binh.db, "groups", id, "expenses"), {
+      description: "Taxi",
+      amount: 100_000,
+      paidBy: an.uid,
+      participants: [binh.uid],
+      spentOn: "2026-11-21",
+      createdBy: binh.uid,
+      createdAt: serverTimestamp(),
+    })
+    await addDoc(collection(an.db, "groups", id, "payments"), {
+      from: binh.uid,
+      to: an.uid,
+      amount: 250_000,
+      note: "",
+      createdBy: an.uid,
+      createdAt: serverTimestamp(),
+    })
+    d = await balancesOf(an, id, (d) => d.expenseCount === 2 && d.paymentCount === 1)
+    expect(d.net).toEqual({})
+
+    // A member can't write them, and a group without them gets them on request.
+    expect(
+      await rejected(setDoc(doc(an.db, "groups", id, "summary", "balances"), { net: {} })),
+    ).toBe("permission-denied")
+    expect(
+      await rejected(mallory.call("refreshBalances", { groupId: id })),
+    ).toBe("functions/permission-denied")
+    await binh.call("refreshBalances", { groupId: id })
+  })
+})
+
 describe("bank accounts", () => {
   it("validates and saves your bank account, readable only by you", async () => {
     expect(

@@ -9,12 +9,14 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
   writeBatch,
   type DocumentData,
@@ -26,6 +28,9 @@ import * as React from "react"
 import { db } from "@/lib/firebase"
 import type { SplitKind } from "@/lib/money"
 import { deleteExpensePhotos, uploadExpensePhotos } from "@/lib/photos"
+
+/** Long lists load this many at a time, newest first, with "Show older" for more. */
+export const PAGE_SIZE = 30
 
 export interface Group {
   id: string
@@ -64,6 +69,10 @@ export interface Expense {
   reference: string | null
   /** The plan (event) it was spent for, if any. */
   eventId: string | null
+  /** When it was added (null for a moment while the server stamps it). */
+  createdAt: Date | null
+  /** When it was last changed, if ever. */
+  editedAt: Date | null
 }
 
 export interface Payment {
@@ -116,10 +125,10 @@ function toDate(value: unknown): Date | null {
 }
 
 /** Subscribes while mounted; `key` says when the query actually changed. */
-function useLive<T>(
+export function useLive<T>(
   key: string,
   source: () => Query<DocumentData> | DocumentReference<DocumentData>,
-  map: (id: string, d: DocumentData) => T,
+  map: (id: string, d: DocumentData, path: string) => T,
 ): Live<T[]> {
   const [state, setState] = React.useState<Live<T[]>>({ data: undefined, error: null })
   const latest = React.useRef({ source, map })
@@ -132,13 +141,14 @@ function useLive<T>(
     if (target.type === "document") {
       return onSnapshot(
         target,
-        (snap) => setState({ data: snap.exists() ? [map(snap.id, snap.data())] : [], error: null }),
+        (snap) =>
+          setState({ data: snap.exists() ? [map(snap.id, snap.data(), snap.ref.path)] : [], error: null }),
         onError,
       )
     }
     return onSnapshot(
       target,
-      (snap) => setState({ data: snap.docs.map((d) => map(d.id, d.data())), error: null }),
+      (snap) => setState({ data: snap.docs.map((d) => map(d.id, d.data(), d.ref.path)), error: null }),
       onError,
     )
   }, [key])
@@ -363,25 +373,56 @@ export function inviteLink(group: Group): string {
 
 // ---------- Expenses and payments ----------
 
-export function useExpenses(groupId: string): Live<Expense[]> {
-  return useLive(
-    `expenses:${groupId}`,
-    () => query(sub(groupId, "expenses"), orderBy("spentOn", "desc")),
-    (id, d) => ({
-      id,
-      description: d.description,
-      amount: d.amount,
-      paidBy: d.paidBy,
-      participants: d.participants,
-      split: d.split ?? "equal",
-      weights: d.weights ?? null,
-      spentOn: d.spentOn,
-      createdBy: d.createdBy,
-      photos: d.photos ?? [],
-      reference: d.reference ?? null,
-      eventId: d.eventId ?? null,
-    }),
+export function toExpense(id: string, d: DocumentData): Expense {
+  return {
+    id,
+    description: d.description,
+    amount: d.amount,
+    paidBy: d.paidBy,
+    participants: d.participants,
+    split: d.split ?? "equal",
+    weights: d.weights ?? null,
+    spentOn: d.spentOn,
+    createdBy: d.createdBy,
+    photos: d.photos ?? [],
+    reference: d.reference ?? null,
+    eventId: d.eventId ?? null,
+    createdAt: toDate(d.createdAt),
+    editedAt: toDate(d.editedAt),
+  }
+}
+
+/** The group's latest `max` expenses by date. `more` says whether older ones exist. */
+export function useExpenses(groupId: string, max = PAGE_SIZE): Live<Expense[]> & { more: boolean } {
+  const live = useLive(
+    `expenses:${groupId}:${max}`,
+    // One extra, to know whether there's more without showing it.
+    () => query(sub(groupId, "expenses"), orderBy("spentOn", "desc"), limit(max + 1)),
+    toExpense,
   )
+  return { ...live, data: live.data?.slice(0, max), more: (live.data?.length ?? 0) > max }
+}
+
+/** What the expense form saves, new or edited. */
+export type ExpenseInput = Pick<
+  Expense,
+  "description" | "amount" | "paidBy" | "participants" | "split" | "weights" | "spentOn" | "eventId"
+> & { reference: string }
+
+function expenseFields(input: ExpenseInput) {
+  const reference = input.reference.trim()
+  const uneven = input.split !== "equal" && input.weights
+  return {
+    description: input.description.trim(),
+    amount: input.amount,
+    paidBy: input.paidBy,
+    participants: input.participants,
+    split: uneven ? input.split : deleteField(),
+    weights: uneven ? input.weights : deleteField(),
+    spentOn: input.spentOn,
+    reference: reference || deleteField(),
+    eventId: input.eventId || deleteField(),
+  }
 }
 
 /**
@@ -390,36 +431,19 @@ export function useExpenses(groupId: string): Live<Expense[]> {
  */
 export async function addExpense(
   groupId: string,
-  input: Pick<
-    Expense,
-    | "description"
-    | "amount"
-    | "paidBy"
-    | "participants"
-    | "split"
-    | "weights"
-    | "spentOn"
-    | "eventId"
-  > & {
-    reference: string
-    photoFiles: File[]
-  },
+  input: ExpenseInput & { photoFiles: File[] },
   uid: string,
 ) {
   const ref = doc(sub(groupId, "expenses"))
   const photos = await uploadExpensePhotos(groupId, ref.id, input.photoFiles)
-  const reference = input.reference.trim()
+  // A new document has nothing to delete: leave out the fields that aren't set.
+  const fields = Object.fromEntries(
+    Object.entries(expenseFields(input)).filter(([, v]) => !isDeleteField(v)),
+  )
   try {
     await setDoc(ref, {
-      description: input.description.trim(),
-      amount: input.amount,
-      paidBy: input.paidBy,
-      participants: input.participants,
-      ...(input.split !== "equal" && input.weights && { split: input.split, weights: input.weights }),
-      spentOn: input.spentOn,
+      ...fields,
       ...(photos.length > 0 && { photos }),
-      ...(reference && { reference }),
-      ...(input.eventId && { eventId: input.eventId }),
       createdBy: uid,
       createdAt: serverTimestamp(),
     })
@@ -427,36 +451,57 @@ export async function addExpense(
     await deleteExpensePhotos(groupId, ref.id, photos).catch(() => undefined)
     throw e
   }
+  balancesChanged(groupId)
+}
+
+const DELETE = deleteField()
+const isDeleteField = (v: unknown) => typeof v === "object" && v !== null && DELETE.isEqual(v as never)
+
+/** Fixes an expense: everything but its photos, who added it and when. */
+export async function updateExpense(groupId: string, id: string, input: ExpenseInput, uid: string) {
+  await updateDoc(doc(db, "groups", groupId, "expenses", id), {
+    ...expenseFields(input),
+    editedAt: serverTimestamp(),
+    editedBy: uid,
+  })
+  balancesChanged(groupId)
 }
 
 /** The photos first: once the expense is gone, they'd be harder to find. */
 export async function deleteExpense(groupId: string, expense: Expense) {
   await deleteExpensePhotos(groupId, expense.id, expense.photos)
-  return deleteDoc(doc(db, "groups", groupId, "expenses", expense.id))
+  await deleteDoc(doc(db, "groups", groupId, "expenses", expense.id))
+  balancesChanged(groupId)
 }
 
-export function usePayments(groupId: string): Live<Payment[]> {
-  return useLive(
-    `payments:${groupId}`,
-    () => query(sub(groupId, "payments"), orderBy("createdAt", "desc")),
-    (id, d) => ({
-      id,
-      from: d.from,
-      to: d.to,
-      amount: d.amount,
-      note: d.note,
-      createdBy: d.createdBy,
-      createdAt: toDate(d.createdAt),
-    }),
+export function toPayment(id: string, d: DocumentData): Payment {
+  return {
+    id,
+    from: d.from,
+    to: d.to,
+    amount: d.amount,
+    note: d.note,
+    createdBy: d.createdBy,
+    createdAt: toDate(d.createdAt),
+  }
+}
+
+/** The latest `max` recorded payments. */
+export function usePayments(groupId: string, max = PAGE_SIZE): Live<Payment[]> & { more: boolean } {
+  const live = useLive(
+    `payments:${groupId}:${max}`,
+    () => query(sub(groupId, "payments"), orderBy("createdAt", "desc"), limit(max + 1)),
+    toPayment,
   )
+  return { ...live, data: live.data?.slice(0, max), more: (live.data?.length ?? 0) > max }
 }
 
-export function addPayment(
+export async function addPayment(
   groupId: string,
   input: Pick<Payment, "from" | "to" | "amount" | "note">,
   uid: string,
 ) {
-  return addDoc(sub(groupId, "payments"), {
+  await addDoc(sub(groupId, "payments"), {
     from: input.from,
     to: input.to,
     amount: input.amount,
@@ -464,10 +509,99 @@ export function addPayment(
     createdBy: uid,
     createdAt: serverTimestamp(),
   })
+  balancesChanged(groupId)
 }
 
-export function deletePayment(groupId: string, paymentId: string) {
-  return deleteDoc(doc(db, "groups", groupId, "payments", paymentId))
+export async function deletePayment(groupId: string, paymentId: string) {
+  await deleteDoc(doc(db, "groups", groupId, "payments", paymentId))
+  balancesChanged(groupId)
+}
+
+// ---------- Balances ----------
+
+export interface Balances {
+  /** + the group owes them, − they owe. Missing means 0. */
+  net: Map<string, number>
+  /** Each person's share of everything spent. */
+  spent: Map<string, number>
+  expenseCount: number
+  paymentCount: number
+  /** A change you just made hasn't been counted yet (the server recounts in a second or two). */
+  updating: boolean
+}
+
+/**
+ * When you last changed money in a group, so its balances can say "updating" until the server's
+ * recount (functions/src/index.ts) has caught up. Only this tab's own changes: other people's
+ * just appear when they're counted.
+ */
+const changedAt = new Map<string, { counted: number; at: number }>()
+/** The last count seen per group (the server's time, so the device's clock doesn't matter). */
+const lastCounted = new Map<string, number>()
+const CHANGED = "twg:balances-changed"
+
+export function balancesChanged(groupId: string) {
+  changedAt.set(groupId, { counted: lastCounted.get(groupId) ?? 0, at: Date.now() })
+  window.dispatchEvent(new CustomEvent(CHANGED, { detail: groupId }))
+}
+
+/**
+ * The group's balances, kept up to date by the server: one document, however long the history.
+ * A group from before they were stored gets counted on first view.
+ */
+export function useBalances(groupId: string): Live<Balances> {
+  const live = useLive(`balances:${groupId}`, () => doc(db, "groups", groupId, "summary", "balances"), (_id, d) => d)
+  const [, rerender] = React.useReducer((n: number) => n + 1, 0)
+  const asked = React.useRef("")
+
+  // Recheck "updating" when you change something, and give up on it after half a minute.
+  React.useEffect(() => {
+    const onChange = (e: Event) => (e as CustomEvent<string>).detail === groupId && rerender()
+    window.addEventListener(CHANGED, onChange)
+    const timer = setInterval(rerender, 5000)
+    return () => {
+      window.removeEventListener(CHANGED, onChange)
+      clearInterval(timer)
+    }
+  }, [groupId])
+
+  const missing = live.data !== undefined && live.data.length === 0
+  React.useEffect(() => {
+    if (!missing || asked.current === groupId) return
+    asked.current = groupId
+    void import("@/lib/payments").then(({ callFunction }) =>
+      callFunction("refreshBalances", { groupId }).catch(() => undefined),
+    )
+  }, [missing, groupId])
+
+  if (live.error) return { data: undefined, error: live.error }
+  const d = live.data?.[0]
+  if (!d) return { data: undefined, error: null }
+  const counted = toDate(d.updatedAt)?.getTime() ?? 0
+  lastCounted.set(groupId, counted)
+  const mine = changedAt.get(groupId)
+  const toNumbers = (o: unknown) => new Map(Object.entries((o ?? {}) as Record<string, number>))
+  return {
+    data: {
+      net: toNumbers(d.net),
+      spent: toNumbers(d.spent),
+      expenseCount: d.expenseCount ?? 0,
+      paymentCount: d.paymentCount ?? 0,
+      // Still the count from before your change (for at most half a minute).
+      updating: mine !== undefined && counted <= mine.counted && Date.now() - mine.at < 30_000,
+    },
+    error: null,
+  }
+}
+
+/** The latest change to a group's money and who made it (null if not known). */
+export function useLastChange(groupId: string): Live<{ at: Date; by: string | null } | null> {
+  const live = useLive(
+    `activity:${groupId}`,
+    () => doc(db, "groups", groupId, "summary", "activity"),
+    (_id, d) => ({ at: toDate(d.at) ?? new Date(0), by: (d.by as string | null) ?? null }),
+  )
+  return { data: live.data && (live.data[0] ?? null), error: live.error }
 }
 
 // ---------- Events ----------

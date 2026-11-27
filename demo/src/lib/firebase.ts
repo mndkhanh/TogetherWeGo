@@ -1,11 +1,9 @@
 import { initializeApp } from "firebase/app"
 import { connectAuthEmulator, getAuth } from "firebase/auth"
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore"
-import { connectFunctionsEmulator, getFunctions } from "firebase/functions"
-import { connectStorageEmulator, getStorage } from "firebase/storage"
 
 const env = import.meta.env
-const useEmulators = env.VITE_USE_EMULATORS === "true"
+export const useEmulators = env.VITE_USE_EMULATORS === "true"
 const projectId = env.VITE_FIREBASE_PROJECT_ID || "demo-togetherwego"
 
 export const app = initializeApp({
@@ -19,15 +17,11 @@ export const app = initializeApp({
 
 export const auth = getAuth(app)
 export const db = getFirestore(app)
-// Same region as the functions (functions/src/index.ts): close to Vietnam.
-export const functions = getFunctions(app, "asia-southeast1")
-// Expense photos.
-export const storage = getStorage(app)
+// Storage (photos) and Functions (bank payments) load on first use: see storage.ts and
+// functions.ts. Most visits need neither, so they stay out of the first download.
 
 if (useEmulators) {
   const host = location.hostname
   connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true })
   connectFirestoreEmulator(db, host, 8085)
-  connectFunctionsEmulator(functions, host, 5001)
-  connectStorageEmulator(storage, host, 9199)
 }

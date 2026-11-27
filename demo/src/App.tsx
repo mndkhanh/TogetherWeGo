@@ -6,22 +6,40 @@ import { StoolMark } from "@/components/stool"
 import { Avatar, cx, Loading } from "@/components/ui"
 import { AuthProvider, signOut, useAuth, useUser } from "@/lib/auth"
 import { useMe } from "@/lib/me"
-import { ActivityPage } from "@/pages/activity"
-import { GroupPage } from "@/pages/group"
-import { GroupsPage } from "@/pages/groups"
-import { JoinPage, ShortJoinPage } from "@/pages/join"
-import { PaymentSettingsPage } from "@/pages/payment-settings"
-import { ProfilePage, ProfileSetup } from "@/pages/profile"
-import { SepayGuidePage } from "@/pages/sepay-guide"
-import { SepayPrompt, useSepayPrompt } from "@/pages/sepay-prompt"
-import { SignInPage } from "@/pages/sign-in"
+import { useSepayPrompt } from "@/pages/sepay-prompt-state"
+
+/**
+ * Every page is its own download, fetched the first time it's opened and then kept by the
+ * browser (files under /assets are cached for a year; see firebase.json).
+ */
+const page = <K extends string>(load: () => Promise<Record<K, React.ComponentType<never>>>, name: K) =>
+  React.lazy(async () => ({ default: (await load())[name] as React.ComponentType }))
+
+const ActivityPage = page(() => import("@/pages/activity"), "ActivityPage")
+const GroupPage = page(() => import("@/pages/group"), "GroupPage")
+const GroupsPage = page(() => import("@/pages/groups"), "GroupsPage")
+const JoinPage = page(() => import("@/pages/join"), "JoinPage")
+const ShortJoinPage = page(() => import("@/pages/join"), "ShortJoinPage")
+const PaymentSettingsPage = page(() => import("@/pages/payment-settings"), "PaymentSettingsPage")
+const ProfilePage = page(() => import("@/pages/profile"), "ProfilePage")
+const ProfileSetup = page(() => import("@/pages/profile"), "ProfileSetup")
+const SepayGuidePage = page(() => import("@/pages/sepay-guide"), "SepayGuidePage")
+const SepayPrompt = React.lazy(async () => ({ default: (await import("@/pages/sepay-prompt")).SepayPrompt }))
+const SignInPage = page(() => import("@/pages/sign-in"), "SignInPage")
 
 export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/sign-in" element={<SignInPage />} />
+          <Route
+            path="/sign-in"
+            element={
+              <React.Suspense fallback={<Loading />}>
+                <SignInPage />
+              </React.Suspense>
+            }
+          />
           <Route element={<RequireAuth />}>
             <Route path="/" element={<GroupsPage />} />
             <Route path="/g/:groupId" element={<GroupPage />} />
@@ -85,15 +103,17 @@ function Shell() {
         </div>
       </header>
       <main className="mx-auto max-w-3xl lg:max-w-5xl xl:max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
-        {!me.ready ? (
-          <Loading />
-        ) : settingUp ? (
-          <ProfileSetup />
-        ) : askingSepay ? (
-          <SepayPrompt onDone={sepay.done} />
-        ) : (
-          <Outlet />
-        )}
+        <React.Suspense fallback={<Loading />}>
+          {!me.ready ? (
+            <Loading />
+          ) : settingUp ? (
+            <ProfileSetup />
+          ) : askingSepay ? (
+            <SepayPrompt onDone={sepay.done} />
+          ) : (
+            <Outlet />
+          )}
+        </React.Suspense>
       </main>
     </div>
   )

@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Landmark, Trash2 } from "lucide-react"
+import { ArrowRight, Check, Landmark, RefreshCw, Trash2 } from "lucide-react"
 import * as React from "react"
 
 import { useConfirm } from "@/components/confirm"
@@ -12,6 +12,7 @@ import {
   Input,
   Loading,
   Panel,
+  ShowOlder,
   useAction,
 } from "@/components/ui"
 import { AmountField } from "@/components/amount-field"
@@ -20,49 +21,48 @@ import {
   addPayment,
   dataErrorMessage,
   deletePayment,
-  useExpenses,
+  PAGE_SIZE,
+  useBalances,
   usePayments,
   type Member,
   type Payment,
 } from "@/lib/data"
-import { formatVnd, netBalances, parseVnd, simplifyDebts, type Transfer } from "@/lib/money"
+import { formatVnd, parseVnd, simplifyDebts, type Transfer } from "@/lib/money"
 import {
   callErrorMessage,
   cancelSettlement,
   confirmSettlement,
   startSettlement,
+  useConfirmedSettlements,
+  usePendingSettlements,
+  useSettlement,
   useSettlementBank,
-  useSettlements,
   type Settlement,
 } from "@/lib/payments"
 import { bankByBin, sepayQrUrl } from "@/shared/banks"
 
 export function BalancesTab({ groupId, members }: { groupId: string; members: Member[] }) {
   const user = useUser()
-  const expenses = useExpenses(groupId)
-  const payments = usePayments(groupId)
-  const settlements = useSettlements(groupId)
+  const [pages, setPages] = React.useState(1)
+  const balances = useBalances(groupId)
+  const payments = usePayments(groupId, pages * PAGE_SIZE)
+  const confirmed = useConfirmedSettlements(groupId, pages * PAGE_SIZE)
+  const pending = usePendingSettlements(groupId)
   const [recording, setRecording] = React.useState<Transfer | null>(null)
   const [showing, setShowing] = React.useState<string | null>(null)
+  const shown = useSettlement(groupId, showing)
   const start = useAction()
   const names = new Map(members.map((m) => [m.uid, m.name]))
   const photos = new Map(members.map((m) => [m.uid, m.photo]))
   const nameOf = (uid: string) => (uid === user.uid ? "You" : (names.get(uid) ?? "A former member"))
 
-  const error = expenses.error ?? payments.error ?? settlements.error
+  const error = balances.error ?? payments.error ?? confirmed.error ?? pending.error
   if (error) return <ErrorText>{dataErrorMessage(error)}</ErrorText>
-  if (!expenses.data || !payments.data || !settlements.data) return <Loading />
+  if (!balances.data || !payments.data || !confirmed.data || !pending.data) return <Loading />
 
-  // Confirmed bank transfers count exactly like recorded payments, for what was actually paid.
-  const confirmed = settlements.data.filter((s) => s.status === "confirmed")
-  const net = netBalances(expenses.data, [
-    ...payments.data,
-    ...confirmed.map((s) => ({ from: s.from, to: s.to, amount: s.paidAmount ?? s.amount })),
-  ])
+  const net = balances.data.net
   const transfers = simplifyDebts(net)
   const mine = net.get(user.uid) ?? 0
-  const pending = settlements.data.filter((s) => s.status === "pending")
-  const open = settlements.data.find((s) => s.id === showing) ?? null
 
   const payByBank = async (t: Transfer) => {
     let id = ""
@@ -94,12 +94,13 @@ export function BalancesTab({ groupId, members }: { groupId: string; members: Me
               {formatVnd(Math.abs(mine))}
             </p>
           )}
+          {balances.data.updating && <Updating />}
         </div>
 
-        {open && (
+        {showing && shown.data && (
           <BankTransferCard
             groupId={groupId}
-            settlement={open}
+            settlement={shown.data}
             nameOf={nameOf}
             onClose={() => setShowing(null)}
           />
@@ -114,7 +115,7 @@ export function BalancesTab({ groupId, members }: { groupId: string; members: Me
               {transfers.map((t) => {
                 const iPay = t.from === user.uid
                 const iGet = t.to === user.uid
-                const inProgress = pending.find((s) => s.from === t.from && s.to === t.to)
+                const inProgress = pending.data?.find((s) => s.from === t.from && s.to === t.to)
                 return (
                   <li key={`${t.from}-${t.to}`} className="flex flex-wrap items-center gap-3 py-3">
                     <Avatar name={names.get(t.from) ?? "?"} uid={t.from} photo={photos.get(t.from)} size="sm" />
@@ -124,7 +125,11 @@ export function BalancesTab({ groupId, members }: { groupId: string; members: Me
                     <span className="text-sm font-semibold">{nameOf(t.to)}</span>
                     <span className="ml-auto font-bold tabular-nums">{formatVnd(t.amount)}</span>
                     {iPay && !inProgress && (
-                      <Button size="sm" disabled={start.busy} onClick={() => void payByBank(t)}>
+                      <Button
+                        size="sm"
+                        disabled={start.busy || balances.data?.updating}
+                        onClick={() => void payByBank(t)}
+                      >
                         <Landmark className="size-3.5" aria-hidden />
                         Pay by bank transfer
                       </Button>
@@ -167,10 +172,10 @@ export function BalancesTab({ groupId, members }: { groupId: string; members: Me
       </div>
 
       <div className="flex flex-col gap-6">
-        {pending.length > 0 && (
+        {pending.data.length > 0 && (
           <Panel title="Bank transfers in progress">
             <ul className="-my-2 divide-y divide-line">
-              {pending.map((s) => (
+              {pending.data.map((s) => (
                 <PendingRow
                   key={s.id}
                   groupId={groupId}
@@ -183,9 +188,26 @@ export function BalancesTab({ groupId, members }: { groupId: string; members: Me
           </Panel>
         )}
 
-        <History groupId={groupId} nameOf={nameOf} payments={payments.data} confirmed={confirmed} />
+        <History
+          groupId={groupId}
+          nameOf={nameOf}
+          payments={payments.data}
+          confirmed={confirmed.data}
+          more={payments.more || confirmed.more}
+          onMore={() => setPages(pages + 1)}
+        />
       </div>
     </div>
+  )
+}
+
+/** A change you just made, still being counted by the server. */
+export function Updating() {
+  return (
+    <p className="mt-2 flex items-center gap-1.5 text-xs text-muted" role="status">
+      <RefreshCw className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+      Updating balances…
+    </p>
   )
 }
 
@@ -374,11 +396,15 @@ function History({
   nameOf,
   payments,
   confirmed,
+  more,
+  onMore,
 }: {
   groupId: string
   nameOf: (uid: string) => string
   payments: Payment[]
   confirmed: Settlement[]
+  more: boolean
+  onMore: () => void
 }) {
   const user = useUser()
   const remove = useAction()
@@ -450,6 +476,7 @@ function History({
           ))}
         </ul>
       )}
+      {more && <ShowOlder onClick={onMore} />}
     </Panel>
   )
 }

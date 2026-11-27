@@ -9,12 +9,13 @@ import {
   updateDoc,
   where,
   limit,
+  type DocumentData,
+  type Query,
 } from "firebase/firestore"
-import { httpsCallable } from "firebase/functions"
 import * as React from "react"
 
-import { db, functions } from "@/lib/firebase"
-import type { Live } from "@/lib/data"
+import { db } from "@/lib/firebase"
+import { balancesChanged, PAGE_SIZE, type Live } from "@/lib/data"
 
 /**
  * Bank accounts, bank-transfer payments and SePay. Writes go through Cloud Functions
@@ -101,29 +102,60 @@ export function usePaymentAccount(uid: string): Live<PaymentAccount | null> {
   )
 }
 
-export function useSettlements(groupId: string): Live<Settlement[]> {
-  return useSnapshot(`settlements:${groupId}`, (set) =>
+export function toSettlement(id: string, d: DocumentData): Settlement {
+  return {
+    id,
+    from: d.from,
+    to: d.to,
+    amount: d.amount,
+    code: d.code,
+    status: d.status,
+    via: d.via,
+    paidAmount: d.paidAmount,
+    createdAt: toDate(d.createdAt),
+    confirmedAt: toDate(d.confirmedAt),
+  }
+}
+
+function useSettlementQuery(key: string, make: () => Query<DocumentData>): Live<Settlement[]> {
+  return useSnapshot(key, (set) =>
     onSnapshot(
-      query(collection(db, "groups", groupId, "settlements"), orderBy("createdAt", "desc")),
-      (snap) =>
-        set({
-          data: snap.docs.map((s) => {
-            const d = s.data()
-            return {
-              id: s.id,
-              from: d.from,
-              to: d.to,
-              amount: d.amount,
-              code: d.code,
-              status: d.status,
-              via: d.via,
-              paidAmount: d.paidAmount,
-              createdAt: toDate(d.createdAt),
-              confirmedAt: toDate(d.confirmedAt),
-            }
-          }),
-          error: null,
-        }),
+      make(),
+      (snap) => set({ data: snap.docs.map((s) => toSettlement(s.id, s.data())), error: null }),
+      (error) => set({ data: undefined, error }),
+    ),
+  )
+}
+
+/** Bank transfers waiting for the money, all of them (there are only ever a few). */
+export function usePendingSettlements(groupId: string): Live<Settlement[]> {
+  return useSettlementQuery(`settlements:pending:${groupId}`, () =>
+    query(collection(db, "groups", groupId, "settlements"), where("status", "==", "pending")),
+  )
+}
+
+/** The latest `max` bank transfers that arrived. */
+export function useConfirmedSettlements(
+  groupId: string,
+  max = PAGE_SIZE,
+): Live<Settlement[]> & { more: boolean } {
+  const live = useSettlementQuery(`settlements:confirmed:${groupId}:${max}`, () =>
+    query(
+      collection(db, "groups", groupId, "settlements"),
+      where("status", "==", "confirmed"),
+      orderBy("confirmedAt", "desc"),
+      limit(max + 1),
+    ),
+  )
+  return { ...live, data: live.data?.slice(0, max), more: (live.data?.length ?? 0) > max }
+}
+
+/** One bank transfer, live (to keep showing it after it's confirmed or called off). */
+export function useSettlement(groupId: string, id: string | null): Live<Settlement | null> {
+  return useSnapshot(id ? `settlement:${groupId}:${id}` : null, (set) =>
+    onSnapshot(
+      doc(db, "groups", groupId, "settlements", id!),
+      (snap) => set({ data: snap.exists() ? toSettlement(snap.id, snap.data()) : null, error: null }),
       (error) => set({ data: undefined, error }),
     ),
   )
@@ -180,44 +212,46 @@ export function useSepayTransfers(uid: string): Live<SepayTransfer[]> {
 
 // ---------- Calls to the functions ----------
 
-export async function savePaymentAccount(input: SettlementBank) {
-  const call = httpsCallable<SettlementBank, { sepayTurnedOff: boolean }>(
-    functions,
-    "savePaymentAccount",
-  )
-  return (await call(input)).data
+/** Calls a Cloud Function, loading the Functions SDK the first time. */
+export async function callFunction<In, Out>(name: string, input?: In): Promise<Out> {
+  const { functions, httpsCallable } = await import("@/lib/functions")
+  return (await httpsCallable<In, Out>(functions, name)(input as In)).data
+}
+
+export function savePaymentAccount(input: SettlementBank) {
+  return callFunction<SettlementBank, { sepayTurnedOff: boolean }>("savePaymentAccount", input)
 }
 
 export async function removePaymentAccount() {
-  await httpsCallable(functions, "removePaymentAccount")()
+  await callFunction("removePaymentAccount")
 }
 
 /** The key is shown once; only its hash is kept. */
 export async function createSepayKey(): Promise<string> {
-  const call = httpsCallable<void, { apiKey: string }>(functions, "createSepayKey")
-  return (await call()).data.apiKey
+  return (await callFunction<void, { apiKey: string }>("createSepayKey")).apiKey
 }
 
 export async function disableSepay() {
-  await httpsCallable(functions, "disableSepay")()
+  await callFunction("disableSepay")
 }
 
 export async function startSettlement(groupId: string, to: string, amount: number) {
-  const call = httpsCallable<
+  const out = await callFunction<
     { groupId: string; to: string; amount: number },
     { settlementId: string }
-  >(functions, "startSettlement")
-  return (await call({ groupId, to, amount })).data.settlementId
+  >("startSettlement", { groupId, to, amount })
+  return out.settlementId
 }
 
 /** The payee saw the money arrive. */
-export function confirmSettlement(groupId: string, settlement: Settlement) {
-  return updateDoc(doc(db, "groups", groupId, "settlements", settlement.id), {
+export async function confirmSettlement(groupId: string, settlement: Settlement) {
+  await updateDoc(doc(db, "groups", groupId, "settlements", settlement.id), {
     status: "confirmed",
     via: "payee",
     paidAmount: settlement.amount,
     confirmedAt: serverTimestamp(),
   })
+  balancesChanged(groupId)
 }
 
 export function cancelSettlement(groupId: string, settlementId: string) {

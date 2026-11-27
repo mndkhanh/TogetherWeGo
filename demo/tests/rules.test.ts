@@ -427,6 +427,80 @@ describe("expenses and payments", () => {
     await assertSucceeds(deleteDoc(doc(as("an"), forAn.path)))
   })
 
+  it("lets the creator or the payer fix an expense, keeping who added it and its photos", async () => {
+    await seed()
+    const ref = await addDoc(
+      collection(as("binh"), "groups/g1/expenses"),
+      expense("binh", { paidBy: "an", photos: ["photo-1.jpg"] }),
+    )
+    const fix = (uid: string, extra: Record<string, unknown> = {}) =>
+      updateDoc(doc(as(uid), ref.path), {
+        amount: 360000,
+        editedAt: serverTimestamp(),
+        editedBy: uid,
+        ...extra,
+      })
+    // Binh added it, An is the payer: both can fix it. Nobody else.
+    await assertSucceeds(fix("binh"))
+    await assertSucceeds(fix("an", { split: "shares", weights: [2, 4] }))
+    await assertSucceeds(fix("an", { split: deleteField(), weights: deleteField() }))
+    await assertFails(fix("mallory"))
+    // The same checks as a new expense.
+    await assertFails(fix("binh", { amount: -1 }))
+    await assertFails(fix("binh", { participants: ["an", "ghost"] }))
+    await assertFails(fix("binh", { paidBy: "mallory" }))
+    // Saying who edited it and when, truthfully.
+    await assertFails(fix("binh", { editedBy: "an" }))
+    await assertFails(updateDoc(doc(as("binh"), ref.path), { amount: 1000 }))
+    // Who added it, when, and its photos stay.
+    await assertFails(fix("binh", { createdBy: "an" }))
+    await assertFails(fix("binh", { createdAt: serverTimestamp() }))
+    await assertFails(fix("binh", { photos: ["photo-2.jpg"] }))
+    await assertFails(fix("binh", { photos: deleteField() }))
+    // A new expense can't pretend to have been edited.
+    await assertFails(
+      addDoc(
+        collection(as("binh"), "groups/g1/expenses"),
+        expense("binh", { editedAt: serverTimestamp(), editedBy: "binh" }),
+      ),
+    )
+  })
+
+  it("lets members read the stored balances, and nobody write them", async () => {
+    await seed()
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "groups/g1/summary/balances"), { net: { an: 1 } })
+    })
+    await assertSucceeds(getDoc(doc(as("binh"), "groups/g1/summary/balances")))
+    await assertFails(getDoc(doc(as("mallory"), "groups/g1/summary/balances")))
+    await assertFails(setDoc(doc(as("an"), "groups/g1/summary/balances"), { net: { an: 9 } }))
+    await assertFails(setDoc(doc(as("an"), "groups/g1/summary/activity"), { by: "an" }))
+  })
+
+  it("finds your own entries across groups, and only yours", async () => {
+    await seed()
+    await addDoc(collection(as("an"), "groups/g1/expenses"), expense("an", { participants: ["an"] }))
+    await addDoc(collection(as("an"), "groups/g1/expenses"), expense("an"))
+    const mine = (uid: string, field: string, op: "==" | "array-contains", value: string) =>
+      getDocs(query(collectionGroup(as(uid), "expenses"), where(field, op, value)))
+    // Bình is in one of them.
+    expect((await assertSucceeds(mine("binh", "participants", "array-contains", "binh"))).size).toBe(1)
+    expect((await assertSucceeds(mine("an", "paidBy", "==", "an"))).size).toBe(2)
+    // Asking for someone else's is refused, as is everything at once.
+    await assertFails(mine("mallory", "participants", "array-contains", "binh"))
+    await assertFails(mine("mallory", "paidBy", "==", "an"))
+    await assertFails(getDocs(collectionGroup(as("binh"), "expenses")))
+    await assertFails(
+      getDocs(query(collectionGroup(as("mallory"), "payments"), where("to", "==", "an"))),
+    )
+    await assertSucceeds(
+      getDocs(query(collectionGroup(as("an"), "payments"), where("to", "==", "an"))),
+    )
+    await assertSucceeds(
+      getDocs(query(collectionGroup(as("an"), "settlements"), where("from", "==", "an"))),
+    )
+  })
+
   it("records a cash payment only by the person who was paid", async () => {
     await seed()
     const pay = (uid: string, from: string, to: string, amount: unknown = 150000) =>

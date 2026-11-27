@@ -1,10 +1,11 @@
 import * as React from "react"
 
+import { CropPicker } from "@/components/crop-picker"
 import { Avatar, Button, ErrorText, Field, Input, Loading, Panel, useAction } from "@/components/ui"
 import { useUser } from "@/lib/auth"
 import { dataErrorMessage } from "@/lib/data"
 import { saveMyProfile, useMe } from "@/lib/me"
-import { deleteAvatar, PhotoError, uploadAvatar } from "@/lib/photos"
+import { deleteAvatar, PhotoError, squareAvatar, uploadAvatar, type Crop } from "@/lib/photos"
 
 export function ProfilePage() {
   const me = useMe()
@@ -43,8 +44,19 @@ export function ProfileSetup() {
   )
 }
 
-/** The photo you're about to save: unchanged or a new file. A photo is required, so never none. */
-type PhotoChoice = { kind: "keep" } | { kind: "new"; file: File; preview: string }
+/**
+ * The photo you're about to save: unchanged, or a new file with the square you picked (`src` is
+ * the whole picture, `preview` just that square). A photo is required, so never none.
+ */
+type PhotoChoice =
+  { kind: "keep" } | { kind: "new"; file: File; src: string; crop: Crop; preview: string }
+
+/** A picture being cropped: a new file, or the one already chosen being adjusted. */
+interface Cropping {
+  file: File
+  src: string
+  initial?: Crop
+}
 
 function ProfileForm({
   name: savedName,
@@ -65,17 +77,23 @@ function ProfileForm({
   const [name, setName] = React.useState(savedName)
   const [altName, setAltName] = React.useState(savedAlt ?? "")
   const [photo, setPhoto] = React.useState<PhotoChoice>({ kind: "keep" })
+  const [cropping, setCropping] = React.useState<Cropping | null>(null)
   const fileInput = React.useRef<HTMLInputElement>(null)
   const { busy, error, run, setError } = useAction()
   const changed =
     setup ||
-    name.trim() !== savedName || altName.trim() !== (savedAlt ?? "") || photo.kind !== "keep"
+    name.trim() !== savedName ||
+    altName.trim() !== (savedAlt ?? "") ||
+    photo.kind !== "keep"
 
   const shown = photo.kind === "new" ? photo.preview : savedPhoto
 
   React.useEffect(
     () => () => {
-      if (photo.kind === "new") URL.revokeObjectURL(photo.preview)
+      if (photo.kind === "new") {
+        URL.revokeObjectURL(photo.src)
+        URL.revokeObjectURL(photo.preview)
+      }
     },
     [photo],
   )
@@ -84,8 +102,37 @@ function ProfileForm({
     if (!file) return
     if (!file.type.startsWith("image/")) return setError("Choose a photo (JPEG or PNG).")
     setError(null)
-    setSaved(false)
-    setPhoto({ kind: "new", file, preview: URL.createObjectURL(file) })
+    setCropping({ file, src: URL.createObjectURL(file) })
+  }
+
+  const cropped = async (crop: Crop) => {
+    if (!cropping) return
+    const { file, src } = cropping
+    setCropping(null)
+    try {
+      const preview = URL.createObjectURL(await squareAvatar(file, crop))
+      setSaved(false)
+      // The previous choice's links are revoked when it's replaced, so adjusting it needs a
+      // fresh link to the same file.
+      const adjusting = photo.kind === "new" && photo.src === src
+      setPhoto({
+        kind: "new",
+        file,
+        src: adjusting ? URL.createObjectURL(file) : src,
+        crop,
+        preview,
+      })
+    } catch (err) {
+      if (photo.kind !== "new" || photo.src !== src) URL.revokeObjectURL(src)
+      setError(err instanceof PhotoError ? err.message : "Couldn't open that photo.")
+    }
+  }
+
+  const cancelCrop = () => {
+    if (cropping && (photo.kind !== "new" || photo.src !== cropping.src)) {
+      URL.revokeObjectURL(cropping.src)
+    }
+    setCropping(null)
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -95,7 +142,8 @@ function ProfileForm({
     if (!name.trim()) return setError("Enter the name your groups should see.")
     const ok = await run(
       async () => {
-        const next = photo.kind === "new" ? await uploadAvatar(user.uid, photo.file) : savedPhoto
+        const next =
+          photo.kind === "new" ? await uploadAvatar(user.uid, photo.file, photo.crop) : savedPhoto
         try {
           await saveMyProfile(user, name, altName, next)
         } catch (err) {
@@ -137,6 +185,18 @@ function ProfileForm({
                 {shown ? "Change photo" : "Add photo"}
               </Button>
               {!shown && <span className="text-xs text-muted">Required</span>}
+              {photo.kind === "new" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setCropping({ file: photo.file, src: photo.src, initial: photo.crop })
+                  }
+                >
+                  Adjust crop
+                </Button>
+              )}
             </div>
             <input
               ref={fileInput}
@@ -187,6 +247,15 @@ function ProfileForm({
             </p>
             <span className="ml-auto text-xs text-muted">Preview</span>
           </div>
+
+          {cropping && (
+            <CropPicker
+              src={cropping.src}
+              initial={cropping.initial}
+              onDone={(crop) => void cropped(crop)}
+              onCancel={cancelCrop}
+            />
+          )}
 
           <ErrorText>{error}</ErrorText>
           <div className="flex items-center gap-3">

@@ -1,19 +1,34 @@
+import {
+  collectionGroup,
+  limit,
+  orderBy,
+  query,
+  where,
+  type DocumentData,
+  type QueryConstraint,
+} from "firebase/firestore"
 import { ArrowDownLeft, ArrowUpRight, Receipt } from "lucide-react"
 import * as React from "react"
 import { Link } from "react-router"
 
-import { cx, Empty, ErrorText, Loading, Panel } from "@/components/ui"
+import { cx, Empty, ErrorText, Loading, Panel, ShowOlder } from "@/components/ui"
 import { useUser } from "@/lib/auth"
+import { db } from "@/lib/firebase"
 import {
   dataErrorMessage,
-  useExpenses,
+  PAGE_SIZE,
+  toExpense,
+  toPayment,
+  useBalances,
+  useLive,
   useMembers,
   useMyGroups,
-  usePayments,
+  type Expense,
   type Group,
+  type Payment,
 } from "@/lib/data"
 import { expenseShares, formatVnd } from "@/lib/money"
-import { useSettlements } from "@/lib/payments"
+import { toSettlement, type Settlement } from "@/lib/payments"
 
 /** One line of your history, from any group. */
 interface Item {
@@ -34,36 +49,37 @@ interface Item {
 
 /**
  * Everything that involves you across your groups, newest first: expenses you paid or have a
- * share in, and money you sent or received (cash, or by bank through SePay).
+ * share in, and money you sent or received (cash, or by bank through SePay). Read with one query
+ * per kind across all groups, a page at a time, so it stays quick however long you've used the app.
  */
 export function ActivityPage() {
   const user = useUser()
   const groups = useMyGroups(user.uid)
-  const [byGroup, setByGroup] = React.useState<Record<string, Item[] | undefined>>({})
+  const [pages, setPages] = React.useState(1)
+  const feed = useMyEntries(user.uid, pages * PAGE_SIZE)
+  const [byGroup, setByGroup] = React.useState<Record<string, GroupInfo | undefined>>({})
   const [filter, setFilter] = React.useState("all")
 
   const report = React.useCallback(
-    (groupId: string, items: Item[] | undefined) =>
-      setByGroup((prev) => (prev[groupId] === items ? prev : { ...prev, [groupId]: items })),
+    (groupId: string, info: GroupInfo | undefined) =>
+      setByGroup((prev) => (prev[groupId] === info ? prev : { ...prev, [groupId]: info })),
     [],
   )
 
   if (groups.error) return <ErrorText>{dataErrorMessage(groups.error)}</ErrorText>
+  if (feed.error) return <ErrorText>{dataErrorMessage(feed.error)}</ErrorText>
   if (!groups.data) return <Loading />
 
   const shown = groups.data.filter((g) => filter === "all" || g.id === filter)
-  const loading = shown.some((g) => byGroup[g.id] === undefined)
-  const items = shown
-    .flatMap((g) => byGroup[g.id] ?? [])
-    .sort((a, b) => b.at.getTime() - a.at.getTime())
-  const myShare = items
-    .filter((i) => i.kind === "expense")
-    .reduce((sum, i) => sum + i.share, 0)
+  const loading = !feed.data || shown.some((g) => byGroup[g.id] === undefined)
+  const items = loading ? [] : toItems(feed.data ?? [], shown, byGroup, user.uid)
+  // Your share of everything spent, from each group's running totals (not just what's shown).
+  const myShare = shown.reduce((sum, g) => sum + (byGroup[g.id]?.spent ?? 0), 0)
 
   return (
     <div className="flex flex-col gap-6">
       {groups.data.map((g) => (
-        <GroupFeed key={g.id} group={g} onItems={report} />
+        <GroupInfoFeed key={g.id} groupId={g.id} onInfo={report} />
       ))}
 
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -93,9 +109,9 @@ export function ActivityPage() {
       <Panel>
         {groups.data.length === 0 ? (
           <Empty>You're not in any groups yet.</Empty>
-        ) : loading && items.length === 0 ? (
+        ) : loading ? (
           <Loading />
-        ) : items.length === 0 ? (
+        ) : items.length === 0 && !feed.more ? (
           <Empty>Nothing yet. Expenses and payments that involve you show up here.</Empty>
         ) : (
           <>
@@ -104,11 +120,179 @@ export function ActivityPage() {
               <span className="font-semibold text-ink tabular-nums">{formatVnd(myShare)}</span>
             </p>
             <Timeline items={items} showGroup={filter === "all" && groups.data.length > 1} />
+            {feed.more && <ShowOlder onClick={() => setPages(pages + 1)} />}
           </>
         )}
       </Panel>
     </div>
   )
+}
+
+/** Names in a group, and your share of all its spending. */
+interface GroupInfo {
+  names: Map<string, string>
+  spent: number
+}
+
+function GroupInfoFeed({
+  groupId,
+  onInfo,
+}: {
+  groupId: string
+  onInfo: (groupId: string, info: GroupInfo | undefined) => void
+}) {
+  const user = useUser()
+  const members = useMembers(groupId)
+  const balances = useBalances(groupId)
+  const spent = balances.data?.spent.get(user.uid)
+  const info = React.useMemo(() => {
+    // A group that can't be read (you were just removed, say) simply adds nothing.
+    if (members.error) return { names: new Map<string, string>(), spent: 0 }
+    if (!members.data) return undefined
+    return { names: new Map(members.data.map((m) => [m.uid, m.name])), spent: spent ?? 0 }
+  }, [members, spent])
+  React.useEffect(() => onInfo(groupId, info), [onInfo, groupId, info])
+  return null
+}
+
+type Entry =
+  | { kind: "expense"; groupId: string; at: Date; expense: Expense }
+  | { kind: "payment"; groupId: string; at: Date; payment: Payment }
+  | { kind: "settlement"; groupId: string; at: Date; settlement: Settlement }
+
+const groupOf = (path: string) => path.split("/")[1] ?? ""
+const dayOf = (spentOn: string) => new Date(`${spentOn}T12:00`)
+
+/**
+ * Your entries from all groups, merged. Each of the six queries returns its newest `max`; where
+ * one has more, anything older than its last row might be missing, so the list stops there and
+ * "Show older" asks for more.
+ */
+function useMyEntries(uid: string, max: number) {
+  const expense = (path: string, id: string, d: DocumentData): Entry => ({
+    kind: "expense",
+    groupId: groupOf(path),
+    at: dayOf(d.spentOn),
+    expense: toExpense(id, d),
+  })
+  const payment = (path: string, id: string, d: DocumentData): Entry => {
+    const p = toPayment(id, d)
+    return { kind: "payment", groupId: groupOf(path), at: p.createdAt ?? new Date(), payment: p }
+  }
+  const settlement = (path: string, id: string, d: DocumentData): Entry => {
+    const s = toSettlement(id, d)
+    return {
+      kind: "settlement",
+      groupId: groupOf(path),
+      at: s.confirmedAt ?? s.createdAt ?? new Date(),
+      settlement: s,
+    }
+  }
+  const confirmed = where("status", "==", "confirmed")
+  const streams = [
+    { map: expense, live: useStreamPaths(`mine:e:in:${uid}`, "expenses", [where("participants", "array-contains", uid), orderBy("spentOn", "desc")], max) },
+    { map: expense, live: useStreamPaths(`mine:e:paid:${uid}`, "expenses", [where("paidBy", "==", uid), orderBy("spentOn", "desc")], max) },
+    { map: payment, live: useStreamPaths(`mine:p:from:${uid}`, "payments", [where("from", "==", uid), orderBy("createdAt", "desc")], max) },
+    { map: payment, live: useStreamPaths(`mine:p:to:${uid}`, "payments", [where("to", "==", uid), orderBy("createdAt", "desc")], max) },
+    { map: settlement, live: useStreamPaths(`mine:s:from:${uid}`, "settlements", [where("from", "==", uid), confirmed, orderBy("confirmedAt", "desc")], max) },
+    { map: settlement, live: useStreamPaths(`mine:s:to:${uid}`, "settlements", [where("to", "==", uid), confirmed, orderBy("confirmedAt", "desc")], max) },
+  ]
+
+  const error = streams.find((s) => s.live.error)?.live.error ?? null
+  if (error) return { data: undefined, error, more: false }
+  if (streams.some((s) => !s.live.data)) return { data: undefined, error: null, more: false }
+
+  let cutoff = -Infinity
+  const seen = new Set<string>()
+  const entries: Entry[] = []
+  for (const { map, live } of streams) {
+    const rows = live.data ?? []
+    const kept = rows.slice(0, max).map((r) => map(r.path, r.id, r.d))
+    if (rows.length > max) cutoff = Math.max(cutoff, kept[kept.length - 1]?.at.getTime() ?? cutoff)
+    for (const e of kept) {
+      // You can be both the payer and in the split: the same expense from two queries.
+      const key = `${e.groupId}/${e.kind}/${e.kind === "expense" ? e.expense.id : e.kind === "payment" ? e.payment.id : e.settlement.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      entries.push(e)
+    }
+  }
+  return {
+    data: entries.filter((e) => e.at.getTime() > cutoff),
+    error: null,
+    more: cutoff > -Infinity,
+  }
+}
+
+/** A collection group query whose rows keep their path (which group they're in). */
+function useStreamPaths(
+  key: string,
+  name: "expenses" | "payments" | "settlements",
+  constraints: QueryConstraint[],
+  max: number,
+) {
+  return useLive(
+    `${key}:${max}`,
+    () => query(collectionGroup(db, name), ...constraints, limit(max + 1)),
+    (id, d, path) => ({ id, d, path }),
+  )
+}
+
+function toItems(
+  entries: Entry[],
+  groups: Group[],
+  info: Record<string, GroupInfo | undefined>,
+  me: string,
+): Item[] {
+  const byId = new Map(groups.map((g) => [g.id, g]))
+  const out: Item[] = []
+  for (const e of entries) {
+    const group = byId.get(e.groupId)
+    if (!group) continue
+    const names = info[e.groupId]?.names
+    const name = (uid: string) => names?.get(uid) ?? "a former member"
+    if (e.kind === "expense") {
+      const x = e.expense
+      const share = expenseShares(x).get(me) ?? 0
+      if (x.paidBy !== me && share === 0) continue
+      out.push({
+        id: x.id,
+        groupId: group.id,
+        groupName: group.name,
+        kind: "expense",
+        title: x.description,
+        detail:
+          x.paidBy === me
+            ? share > 0
+              ? `You paid · your share ${formatVnd(share)}`
+              : "You paid · not in the split"
+            : `${name(x.paidBy)} paid · your share ${formatVnd(share)}`,
+        effect: x.paidBy === me ? x.amount - share : -share,
+        amount: x.amount,
+        share,
+        at: e.at,
+      })
+      continue
+    }
+    const p =
+      e.kind === "payment"
+        ? { id: e.payment.id, from: e.payment.from, to: e.payment.to, amount: e.payment.amount, how: e.payment.note ? `cash · ${e.payment.note}` : "cash" }
+        : { id: e.settlement.id, from: e.settlement.from, to: e.settlement.to, amount: e.settlement.paidAmount ?? e.settlement.amount, how: "bank transfer" }
+    const paid = p.from === me
+    out.push({
+      id: p.id,
+      groupId: group.id,
+      groupName: group.name,
+      kind: paid ? "paid" : "received",
+      title: paid ? `You paid ${name(p.to)}` : `${name(p.from)} paid you`,
+      detail: p.how,
+      effect: paid ? p.amount : -p.amount,
+      amount: p.amount,
+      share: 0,
+      at: e.at,
+    })
+  }
+  return out.sort((a, b) => b.at.getTime() - a.at.getTime())
 }
 
 function Timeline({ items, showGroup }: { items: Item[]; showGroup: boolean }) {
@@ -174,92 +358,4 @@ function Timeline({ items, showGroup }: { items: Item[]; showGroup: boolean }) {
       })}
     </ol>
   )
-}
-
-/** Reads one group's expenses and payments and hands the ones involving you to the page. */
-function GroupFeed({
-  group,
-  onItems,
-}: {
-  group: Group
-  onItems: (groupId: string, items: Item[] | undefined) => void
-}) {
-  const user = useUser()
-  const expenses = useExpenses(group.id)
-  const payments = usePayments(group.id)
-  const settlements = useSettlements(group.id)
-  const members = useMembers(group.id)
-
-  const items = React.useMemo(() => {
-    // A group that can't be read (you were just removed, say) simply adds nothing.
-    if (expenses.error || payments.error || members.error) return []
-    if (!expenses.data || !payments.data || !members.data) return undefined
-    const me = user.uid
-    const names = new Map(members.data.map((m) => [m.uid, m.name]))
-    const name = (uid: string) => names.get(uid) ?? "a former member"
-    const out: Item[] = []
-
-    for (const e of expenses.data) {
-      const share = expenseShares(e).get(me) ?? 0
-      if (e.paidBy !== me && share === 0) continue
-      out.push({
-        id: e.id,
-        groupId: group.id,
-        groupName: group.name,
-        kind: "expense",
-        title: e.description,
-        detail:
-          e.paidBy === me
-            ? share > 0
-              ? `You paid · your share ${formatVnd(share)}`
-              : "You paid · not in the split"
-            : `${name(e.paidBy)} paid · your share ${formatVnd(share)}`,
-        effect: e.paidBy === me ? e.amount - share : -share,
-        amount: e.amount,
-        share,
-        at: new Date(`${e.spentOn}T12:00`),
-      })
-    }
-
-    const money = [
-      ...payments.data.map((p) => ({
-        id: p.id,
-        from: p.from,
-        to: p.to,
-        amount: p.amount,
-        at: p.createdAt,
-        how: p.note ? `cash · ${p.note}` : "cash",
-      })),
-      ...(settlements.data ?? [])
-        .filter((s) => s.status === "confirmed")
-        .map((s) => ({
-          id: s.id,
-          from: s.from,
-          to: s.to,
-          amount: s.paidAmount ?? s.amount,
-          at: s.confirmedAt ?? s.createdAt,
-          how: "bank transfer",
-        })),
-    ]
-    for (const p of money) {
-      if (p.from !== me && p.to !== me) continue
-      const paid = p.from === me
-      out.push({
-        id: p.id,
-        groupId: group.id,
-        groupName: group.name,
-        kind: paid ? "paid" : "received",
-        title: paid ? `You paid ${name(p.to)}` : `${name(p.from)} paid you`,
-        detail: p.how,
-        effect: paid ? p.amount : -p.amount,
-        amount: p.amount,
-        share: 0,
-        at: p.at ?? new Date(),
-      })
-    }
-    return out
-  }, [expenses, payments, settlements.data, members, user.uid, group.id, group.name])
-
-  React.useEffect(() => onItems(group.id, items), [onItems, group.id, items])
-  return null
 }

@@ -109,6 +109,17 @@ export function Empty({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** Loads the next page of a long list. */
+export function ShowOlder({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="mt-3 flex justify-center">
+      <Button variant="ghost" size="sm" onClick={onClick}>
+        Show older
+      </Button>
+    </div>
+  )
+}
+
 export function Loading() {
   return <p className="py-6 text-center text-sm text-muted">Loading…</p>
 }

@@ -2,10 +2,19 @@ import { ChevronRight, Plus } from "lucide-react"
 import * as React from "react"
 import { Link, useNavigate } from "react-router"
 
-import { Button, Empty, ErrorText, Input, Loading, Panel, useAction } from "@/components/ui"
+import { Button, cx, Empty, ErrorText, Input, Loading, Panel, useAction } from "@/components/ui"
 import { useUser } from "@/lib/auth"
 import { useMe } from "@/lib/me"
-import { createGroup, dataErrorMessage, useMyGroups } from "@/lib/data"
+import {
+  createGroup,
+  dataErrorMessage,
+  useBalances,
+  useLastChange,
+  useMyGroups,
+  type Group,
+} from "@/lib/data"
+import { formatVnd } from "@/lib/money"
+import { lastSeen } from "@/lib/seen"
 
 export function GroupsPage() {
   const user = useUser()
@@ -40,15 +49,7 @@ export function GroupsPage() {
           ) : (
             <ul className="-my-2 divide-y divide-line">
               {groups.data.map((g) => (
-                <li key={g.id}>
-                  <Link
-                    to={`/g/${g.id}`}
-                    className="flex items-center justify-between rounded-lg py-3 font-semibold hover:text-brand"
-                  >
-                    {g.name}
-                    <ChevronRight className="size-4 text-muted" aria-hidden />
-                  </Link>
-                </li>
+                <GroupRow key={g.id} group={g} />
               ))}
             </ul>
           )}
@@ -76,5 +77,47 @@ export function GroupsPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+/** A group, where you stand in it, and a dot when someone else changed its money since your last visit. */
+function GroupRow({ group }: { group: Group }) {
+  const user = useUser()
+  const balances = useBalances(group.id)
+  const change = useLastChange(group.id)
+  const mine = balances.data?.net.get(user.uid) ?? 0
+  const seen = lastSeen(user.uid, group.id)
+  const fresh =
+    change.data != null && change.data.by !== user.uid && (!seen || change.data.at > seen)
+  return (
+    <li>
+      <Link
+        to={`/g/${group.id}`}
+        className="flex items-center gap-3 rounded-lg py-3 hover:text-brand"
+      >
+        <span className="min-w-0 flex-1 truncate font-semibold">{group.name}</span>
+        {fresh && (
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+            <span className="size-2 rounded-full bg-marigold" aria-hidden />
+            New
+          </span>
+        )}
+        {balances.data && (
+          <span
+            className={cx(
+              "text-sm tabular-nums",
+              mine > 0 ? "text-owed" : mine < 0 ? "text-owe" : "text-muted",
+            )}
+          >
+            {mine > 0
+              ? `owed ${formatVnd(mine)}`
+              : mine < 0
+                ? `you owe ${formatVnd(-mine)}`
+                : "all square"}
+          </span>
+        )}
+        <ChevronRight className="size-4 shrink-0 text-muted" aria-hidden />
+      </Link>
+    </li>
   )
 }

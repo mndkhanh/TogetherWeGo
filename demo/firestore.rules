@@ -14,6 +14,7 @@ rules_version = '2';
 //       rsvps/{uid}                         status, name, updatedAt
 //     settlements/{settlementId}            from, to, amount, code, status, via, paidAmount, ...
 //       private/bank                        the payee's bank details for that payment
+//     summary/balances, summary/activity    running balances and the latest change (functions only)
 //   paymentAccounts/{uid}                   your bank account and SePay key hash
 //   paymentCodes/{code}, sepayTransfers/…   server only
 //
@@ -24,8 +25,8 @@ rules_version = '2';
 //
 // Everything in a group is visible only to its members. Joining needs the group's invite code
 // (shared as a link), and the owner can remove members. Amounts are whole VND. Nothing is ever
-// updated in place except a group's name, invite code and member list, events (by whoever
-// created them) and your own RSVP.
+// updated in place except a group's name, invite code and member list, expenses (by whoever
+// added them or paid), events (by whoever created them) and your own RSVP.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -83,6 +84,20 @@ service cloud.firestore {
     // which may not exist yet).
     match /{path=**}/members/{memberId} {
       allow read: if signedIn() && (memberId == uid() || resource.data.uid == uid());
+    }
+
+    // Your activity: expenses, payments and bank transfers that involve you, across all your
+    // groups in one query each (collection group queries filtered to you). Only entries you're
+    // part of, which you could already read in the group itself.
+    match /{path=**}/expenses/{expenseId} {
+      allow read: if signedIn()
+        && (uid() in resource.data.participants || resource.data.paidBy == uid());
+    }
+    match /{path=**}/payments/{paymentId} {
+      allow read: if signedIn() && (resource.data.from == uid() || resource.data.to == uid());
+    }
+    match /{path=**}/settlements/{settlementId} {
+      allow read: if signedIn() && (resource.data.from == uid() || resource.data.to == uid());
     }
 
     // Only you see your bank account and SePay status. All changes go through functions.
@@ -327,35 +342,51 @@ service cloud.firestore {
       match /expenses/{expenseId} {
         allow read: if isMember(groupId);
 
-        // Any member can record what any member paid (a friend often logs the bill for whoever
-        // paid it). The history shows who added it, and the payer can delete it. Split equally
-        // between participants, or by their weights (computed the same way by every client,
+        // What any expense must be, new or edited. Any member can record what any member paid
+        // (a friend often logs the bill for whoever paid it). Split equally between
+        // participants, or by their weights (computed the same way by every client,
         // src/shared/money.ts), who must all be in the group.
-        allow create: if isMember(groupId)
-          && request.resource.data.keys().hasAll(['description', 'amount', 'paidBy', 'participants', 'spentOn', 'createdBy', 'createdAt'])
-          && request.resource.data.keys().hasOnly(['description', 'amount', 'paidBy', 'participants', 'split', 'weights', 'spentOn', 'createdBy', 'createdAt', 'photos', 'reference', 'eventId'])
-          && photosOk(request.resource.data.get('photos', []))
-          && (!('reference' in request.resource.data) || text(request.resource.data.reference, 1, 300))
-          && request.resource.data.createdBy == uid()
-          && request.resource.data.createdAt == request.time
-          && text(request.resource.data.description, 1, 120)
-          && money(request.resource.data.amount)
-          && request.resource.data.paidBy is string
-          && request.resource.data.paidBy in memberIds(groupId)
-          && request.resource.data.participants is list
-          && request.resource.data.participants.size() >= 1
-          && request.resource.data.participants.size() <= 50
-          && request.resource.data.participants.toSet().size() == request.resource.data.participants.size()
-          && memberIds(groupId).hasAll(request.resource.data.participants)
-          && splitOk(request.resource.data)
-          // Optionally for one of this group's plans.
-          && (!('eventId' in request.resource.data)
-            || (request.resource.data.eventId is string
-              && exists(/databases/$(database)/documents/groups/$(groupId)/events/$(request.resource.data.eventId))))
-          && request.resource.data.spentOn is string
-          && request.resource.data.spentOn.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+        function expenseOk(d) {
+          return d.keys().hasAll(['description', 'amount', 'paidBy', 'participants', 'spentOn', 'createdBy', 'createdAt'])
+            && d.keys().hasOnly(['description', 'amount', 'paidBy', 'participants', 'split', 'weights', 'spentOn', 'createdBy', 'createdAt', 'photos', 'reference', 'eventId', 'editedAt', 'editedBy'])
+            && photosOk(d.get('photos', []))
+            && (!('reference' in d) || text(d.reference, 1, 300))
+            && text(d.description, 1, 120)
+            && money(d.amount)
+            && d.paidBy is string
+            && d.paidBy in memberIds(groupId)
+            && d.participants is list
+            && d.participants.size() >= 1
+            && d.participants.size() <= 50
+            && d.participants.toSet().size() == d.participants.size()
+            && memberIds(groupId).hasAll(d.participants)
+            && splitOk(d)
+            // Optionally for one of this group's plans.
+            && (!('eventId' in d)
+              || (d.eventId is string
+                && exists(/databases/$(database)/documents/groups/$(groupId)/events/$(d.eventId))))
+            && d.spentOn is string
+            && d.spentOn.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+        }
 
-        allow update: if false;
+        allow create: if isMember(groupId)
+          && expenseOk(request.resource.data)
+          && !('editedAt' in request.resource.data)
+          && !('editedBy' in request.resource.data)
+          && request.resource.data.createdBy == uid()
+          && request.resource.data.createdAt == request.time;
+
+        // Whoever added it, or the person it says paid, can fix it. Who added it and when stay,
+        // and so do the photos (they're added with the expense; storage.rules).
+        allow update: if isMember(groupId)
+          && (resource.data.createdBy == uid() || resource.data.paidBy == uid())
+          && expenseOk(request.resource.data)
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.get('photos', []) == resource.data.get('photos', [])
+          && request.resource.data.editedAt == request.time
+          && request.resource.data.editedBy == uid();
+
         // Whoever added it, or the person it says paid (if they didn't, or it's wrong).
         allow delete: if isMember(groupId)
           && (resource.data.createdBy == uid() || resource.data.paidBy == uid());
@@ -378,6 +409,12 @@ service cloud.firestore {
 
         allow update: if false;
         allow delete: if isMember(groupId) && resource.data.createdBy == uid();
+      }
+
+      // Running balances and the latest change, kept by the functions (functions/src/index.ts).
+      match /summary/{docId} {
+        allow read: if isMember(groupId);
+        allow write: if false;
       }
 
       match /settlements/{settlementId} {

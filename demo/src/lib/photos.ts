@@ -1,6 +1,5 @@
-import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage"
-
-import { storage } from "@/lib/firebase"
+/** The Storage SDK, loaded the first time a photo is shown or saved. */
+const sdk = () => import("@/lib/storage")
 
 /** At most this many photos on one expense (firestore.rules and storage.rules agree). */
 export const MAX_PHOTOS = 4
@@ -10,8 +9,10 @@ const LONGEST_SIDE = 1600
 /** A photo the browser can't open (a HEIC on some desktops, a broken file). Its message is for people. */
 export class PhotoError extends Error {}
 
-const photoRef = (groupId: string, expenseId: string, name: string) =>
-  ref(storage, `groups/${groupId}/expenses/${expenseId}/${name}`)
+async function photoRef(groupId: string, expenseId: string, name: string) {
+  const { ref, storage } = await sdk()
+  return ref(storage, `groups/${groupId}/expenses/${expenseId}/${name}`)
+}
 
 async function open(file: File) {
   return createImageBitmap(file).catch(() => {
@@ -48,7 +49,12 @@ async function shrink(file: File): Promise<Blob> {
   const bitmap = await open(file)
   const { width: w, height: h } = bitmap
   const scale = Math.min(1, LONGEST_SIDE / Math.max(w, h))
-  return toJpeg(bitmap, { x: 0, y: 0, w, h }, { w: Math.round(w * scale), h: Math.round(h * scale) }, file.name)
+  return toJpeg(
+    bitmap,
+    { x: 0, y: 0, w, h },
+    { w: Math.round(w * scale), h: Math.round(h * scale) },
+    file.name,
+  )
 }
 
 /** Uploads the photos for an expense that's about to be saved. Returns their file names. */
@@ -60,7 +66,8 @@ export async function uploadExpensePhotos(
   return Promise.all(
     files.slice(0, MAX_PHOTOS).map(async (file, i) => {
       const name = `photo-${i + 1}.jpg`
-      await uploadBytes(photoRef(groupId, expenseId, name), await shrink(file), {
+      const { uploadBytes } = await sdk()
+      await uploadBytes(await photoRef(groupId, expenseId, name), await shrink(file), {
         contentType: "image/jpeg",
       })
       return name
@@ -68,10 +75,11 @@ export async function uploadExpensePhotos(
   )
 }
 
-export function deleteExpensePhotos(groupId: string, expenseId: string, names: string[]) {
+export async function deleteExpensePhotos(groupId: string, expenseId: string, names: string[]) {
+  const { deleteObject } = await sdk()
   return Promise.all(
-    names.map((name) =>
-      deleteObject(photoRef(groupId, expenseId, name)).catch((e: { code?: string }) => {
+    names.map(async (name) =>
+      deleteObject(await photoRef(groupId, expenseId, name)).catch((e: { code?: string }) => {
         // Already gone is fine.
         if (e.code !== "storage/object-not-found") throw e
       }),
@@ -79,35 +87,46 @@ export function deleteExpensePhotos(groupId: string, expenseId: string, names: s
   )
 }
 
-export function expensePhotoUrl(groupId: string, expenseId: string, name: string) {
-  return getDownloadURL(photoRef(groupId, expenseId, name))
+export async function expensePhotoUrl(groupId: string, expenseId: string, name: string) {
+  const { getDownloadURL } = await sdk()
+  return getDownloadURL(await photoRef(groupId, expenseId, name))
 }
 
 // ---------- Profile photos ----------
 
 const AVATAR_SIDE = 256
 
-/** The middle square of the picture, 256 px: a few KB, plenty for a round avatar. */
-async function squareAvatar(file: File): Promise<Blob> {
+/** A square part of a picture, in its own pixels (top-left corner and side). */
+export interface Crop {
+  x: number
+  y: number
+  side: number
+}
+
+/**
+ * The chosen square of the picture (the middle one if none was chosen), at most 256 px: a few KB,
+ * plenty for a round avatar.
+ */
+export async function squareAvatar(file: File, crop?: Crop): Promise<Blob> {
   const bitmap = await open(file)
-  const side = Math.min(bitmap.width, bitmap.height)
-  const out = Math.min(AVATAR_SIDE, side)
-  return toJpeg(
-    bitmap,
-    { x: (bitmap.width - side) / 2, y: (bitmap.height - side) / 2, w: side, h: side },
-    { w: out, h: out },
-    file.name,
-  )
+  const short = Math.min(bitmap.width, bitmap.height)
+  // Kept inside the picture, whatever rounding did.
+  const side = Math.min(short, Math.max(1, crop?.side ?? short))
+  const x = Math.min(bitmap.width - side, Math.max(0, crop?.x ?? (bitmap.width - side) / 2))
+  const y = Math.min(bitmap.height - side, Math.max(0, crop?.y ?? (bitmap.height - side) / 2))
+  const out = Math.round(Math.min(AVATAR_SIDE, side))
+  return toJpeg(bitmap, { x, y, w: side, h: side }, { w: out, h: out }, file.name)
 }
 
 /**
  * Uploads a new profile photo and returns its link. Each upload gets a new file name, so
  * nobody keeps seeing the old picture from their browser's cache.
  */
-export async function uploadAvatar(uid: string, file: File): Promise<string> {
+export async function uploadAvatar(uid: string, file: File, crop?: Crop): Promise<string> {
   const name = `avatar-${Date.now().toString(36)}.jpg`
+  const { getDownloadURL, ref, storage, uploadBytes } = await sdk()
   const target = ref(storage, `avatars/${uid}/${name}`)
-  await uploadBytes(target, await squareAvatar(file), { contentType: "image/jpeg" })
+  await uploadBytes(target, await squareAvatar(file, crop), { contentType: "image/jpeg" })
   return getDownloadURL(target)
 }
 
@@ -115,6 +134,7 @@ export async function uploadAvatar(uid: string, file: File): Promise<string> {
 export async function deleteAvatar(url: string) {
   const path = /\/o\/([^?]+)/.exec(url)?.[1]
   if (!path) return
+  const { deleteObject, ref, storage } = await sdk()
   await deleteObject(ref(storage, decodeURIComponent(path))).catch((e: { code?: string }) => {
     if (e.code !== "storage/object-not-found") throw e
   })

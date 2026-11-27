@@ -7,6 +7,7 @@
  *   groups/{g}/settlements/{s}/private/bank       where to send it (only payer and payee read it)
  *   paymentCodes/{code}                           code => settlement, for the webhook (server only)
  *   sepayTransfers/{uid}_{sepayId}                every transfer SePay told us about (owner reads)
+ *   groups/{g}/summary/balances                   running balances, so pages needn't read all history
  *
  * The functions below are the only writers of these documents.
  */
@@ -16,16 +17,18 @@ import { initializeApp } from "firebase-admin/app"
 import {
   FieldValue,
   getFirestore,
+  Timestamp,
   type DocumentData,
   type Transaction,
 } from "firebase-admin/firestore"
 import { setGlobalOptions } from "firebase-functions/v2"
+import { onDocumentWritten } from "firebase-functions/v2/firestore"
 import { HttpsError, onCall, onRequest, type CallableRequest } from "firebase-functions/v2/https"
 import { logger } from "firebase-functions"
 import { z } from "zod"
 
 import { bankByBin } from "../../src/shared/banks.js"
-import { netBalances, simplifyDebts } from "../../src/shared/money.js"
+import { expenseShares, netBalances, simplifyDebts } from "../../src/shared/money.js"
 import {
   findPaymentCodes,
   PAYMENT_CODE_ALPHABET,
@@ -233,37 +236,136 @@ export const startSettlement = onCall(async (request) => {
   throw new HttpsError("internal", "Couldn't make a payment code. Try again.")
 })
 
-/** What `from` owes `to` in the group's settle-up plan right now; 0 if nothing. */
+/**
+ * What `from` owes `to` in the group's settle-up plan right now; 0 if nothing. Counted afresh
+ * from the whole history (not the stored balances, which can lag a second behind), and the
+ * stored balances are refreshed on the way.
+ */
 async function owedBetween(groupId: string, from: string, to: string): Promise<number> {
-  const group = db.collection("groups").doc(groupId)
+  const net = await recomputeBalances(groupId)
+  return simplifyDebts(net).find((t) => t.from === from && t.to === to)?.amount ?? 0
+}
+
+// ---------- Running balances ----------
+
+/**
+ * groups/{g}/summary/balances: each member's net balance (+ the group owes them) and their
+ * share of all spending, plus a few counts. Pages read this one document instead of the
+ * group's whole history. It's recounted from scratch whenever an expense, payment or
+ * confirmed bank transfer changes, so it can't drift.
+ *
+ * Two recounts can overlap. Each one notes when it read the history (`readTime`, the oldest of
+ * its three reads), and only replaces a recount that read earlier: the last change's recount
+ * reads after that change, so it always wins.
+ */
+async function recomputeBalances(groupId: string): Promise<Map<string, number>> {
+  const group = db.doc(`groups/${groupId}`)
   const [expenses, payments, settlements] = await Promise.all([
     group.collection("expenses").get(),
     group.collection("payments").get(),
     group.collection("settlements").where("status", "==", "confirmed").get(),
   ])
-  const net = netBalances(
-    expenses.docs.map((d) => {
-      const e = d.data()
-      return {
-        amount: e.amount,
-        paidBy: e.paidBy,
-        participants: e.participants,
-        weights: e.weights ?? null,
-      }
-    }),
-    [
-      ...payments.docs.map((d) => {
-        const p = d.data()
-        return { from: p.from, to: p.to, amount: p.amount }
-      }),
-      ...settlements.docs.map((d) => {
-        const s = d.data()
-        return { from: s.from, to: s.to, amount: s.paidAmount ?? s.amount }
-      }),
-    ],
+  const readTime = [expenses.readTime, payments.readTime, settlements.readTime].reduce((a, b) =>
+    a.toMillis() <= b.toMillis() ? a : b,
   )
-  return simplifyDebts(net).find((t) => t.from === from && t.to === to)?.amount ?? 0
+  const asExpenses = expenses.docs.map((d) => {
+    const e = d.data()
+    return {
+      amount: e.amount as number,
+      paidBy: e.paidBy as string,
+      participants: e.participants as string[],
+      weights: (e.weights as number[] | undefined) ?? null,
+    }
+  })
+  const net = netBalances(asExpenses, [
+    ...payments.docs.map((d) => {
+      const p = d.data()
+      return { from: p.from, to: p.to, amount: p.amount }
+    }),
+    ...settlements.docs.map((d) => {
+      const s = d.data()
+      return { from: s.from, to: s.to, amount: s.paidAmount ?? s.amount }
+    }),
+  ])
+  const spent = new Map<string, number>()
+  for (const e of asExpenses) {
+    for (const [who, share] of expenseShares(e)) spent.set(who, (spent.get(who) ?? 0) + share)
+  }
+
+  const ref = group.collection("summary").doc("balances")
+  await db.runTransaction(async (tx) => {
+    const current = (await tx.get(ref)).data()
+    const seen = current?.readTime as Timestamp | undefined
+    if (seen && seen.toMillis() >= readTime.toMillis()) return
+    tx.set(ref, {
+      net: Object.fromEntries([...net].filter(([, v]) => v !== 0)),
+      spent: Object.fromEntries(spent),
+      expenseCount: expenses.size,
+      paymentCount: payments.size + settlements.size,
+      readTime,
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+  })
+  return net
 }
+
+/** Who made a change, for "new since your last visit"; null when it can't be told. */
+function changedBy(before: DocumentData | undefined, after: DocumentData | undefined) {
+  if (after?.status === "confirmed" && before?.status !== "confirmed") {
+    return after.via === "payee" ? (after.to as string) : null
+  }
+  return ((after?.editedBy ?? (after ?? before)?.createdBy) as string | undefined) ?? null
+}
+
+/** The latest change to the group's money, kept apart from the recount (never goes backwards). */
+async function noteChange(groupId: string, by: string | null, at: Timestamp) {
+  const ref = db.doc(`groups/${groupId}/summary/activity`)
+  await db.runTransaction(async (tx) => {
+    const current = (await tx.get(ref)).data()
+    const last = current?.at as Timestamp | undefined
+    if (last && last.toMillis() >= at.toMillis()) return
+    tx.set(ref, { at, by })
+  })
+}
+
+const onMoneyChange = (collection: string) =>
+  onDocumentWritten(`groups/{groupId}/${collection}/{docId}`, async (event) => {
+    const before = event.data?.before.data()
+    const after = event.data?.after.data()
+    // Bank transfers count once confirmed; starting or cancelling one changes nothing.
+    if (collection === "settlements") {
+      const counted = (d?: DocumentData) =>
+        d?.status === "confirmed" ? `${d.from}>${d.to}:${d.paidAmount ?? d.amount}` : null
+      if (counted(before) === counted(after)) return
+    }
+    const groupId = event.params.groupId
+    // The group itself may be gone (nothing deletes groups today, but don't recreate one).
+    if (!(await db.doc(`groups/${groupId}`).get()).exists) return
+    await Promise.all([
+      recomputeBalances(groupId),
+      noteChange(groupId, changedBy(before, after), Timestamp.fromDate(new Date(event.time))),
+    ])
+  })
+
+export const balancesOnExpense = onMoneyChange("expenses")
+export const balancesOnPayment = onMoneyChange("payments")
+export const balancesOnSettlement = onMoneyChange("settlements")
+
+/**
+ * For groups whose balances were never stored (they had no changes since this was added): any
+ * member can ask for a count. Cheap to refuse when it's already there.
+ */
+export const refreshBalances = onCall(async (request) => {
+  const uid = signedIn(request)
+  const { groupId } = parse(z.object({ groupId: z.string().min(1).max(64) }), request.data)
+  if (!(await isMember(groupId, uid))) {
+    throw new HttpsError("permission-denied", "You're not in this group.")
+  }
+  if (!(await db.doc(`groups/${groupId}/summary/balances`).get()).exists) {
+    await recomputeBalances(groupId)
+  }
+  return {}
+})
 
 // ---------- SePay webhook ----------
 
