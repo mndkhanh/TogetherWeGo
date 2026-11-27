@@ -20,14 +20,31 @@ describe("parseVnd", () => {
   })
   it("reads amounts written in parts", () => {
     expect(parseVnd("1m250k")).toBe(1_250_000)
-    expect(parseVnd("1m250")).toBe(1_000_250)
+    // Digits after a unit carry on from it, as people write it in Vietnam.
+    expect(parseVnd("1m250")).toBe(1_250_000)
+    expect(parseVnd("1tr2")).toBe(1_200_000)
+    expect(parseVnd("1tr05")).toBe(1_050_000)
+    expect(parseVnd("1tr250500")).toBe(1_250_500)
+    expect(parseVnd("3k5")).toBe(3_500)
+    expect(parseVnd("3k05")).toBe(3_050)
+    expect(parseVnd("1m250k5")).toBe(1_250_500)
     expect(parseVnd("1m250k500")).toBe(1_250_500)
     expect(parseVnd("2tr500k")).toBe(2_500_000)
     expect(parseVnd("3k500")).toBe(3_500)
     expect(parseVnd("1M 250K")).toBe(1_250_000)
     expect(parseVnd("1m0k")).toBe(1_000_000)
     // A part too big for its place is a typo, and units come largest first, once each.
-    for (const bad of ["1m2500k", "1k1000", "1m1000000", "250k1m", "1m1m", "1.5m250k", "m250k"]) {
+    for (const bad of [
+      "1m2500k",
+      "1k1000",
+      "3k5000",
+      "1m250k5000",
+      "1m1000000",
+      "250k1m",
+      "1m1m",
+      "1.5m250k",
+      "m250k",
+    ]) {
       expect(parseVnd(bad)).toBeNull()
     }
   })
@@ -123,9 +140,25 @@ describe("uneven splits", () => {
       chi: 325_000,
       dung: 325_000,
     })
-    expect(splitByAmounts(500, [["a", 200], ["b", 300]]).ok).toBe(true)
-    expect(splitByAmounts(500, [["a", 200], ["b", 250]])).toEqual({ ok: false, left: 50 })
-    expect(splitByAmounts(500, [["a", 400], ["b", 200], ["c", null]])).toEqual({ ok: false, left: -100 })
+    expect(
+      splitByAmounts(500, [
+        ["a", 200],
+        ["b", 300],
+      ]).ok,
+    ).toBe(true)
+    expect(
+      splitByAmounts(500, [
+        ["a", 200],
+        ["b", 250],
+      ]),
+    ).toEqual({ ok: false, left: 50 })
+    expect(
+      splitByAmounts(500, [
+        ["a", 400],
+        ["b", 200],
+        ["c", null],
+      ]),
+    ).toEqual({ ok: false, left: -100 })
   })
 
   it("counts uneven expenses in balances", () => {

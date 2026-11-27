@@ -15,10 +15,17 @@ const UNITS: [suffix: string, scale: number, number: RegExp][] = [
 ]
 
 /**
- * Millions, then thousands, then dong, each written once: "1m250k", "1m250", "2tr500k", "3k500".
- * Each part below the first must fit under the unit above it, so "1m2500k" is a typo, not 3.5m.
+ * Millions, then thousands, then dong, each written once: "1m250k", "2tr500k", "1m250k500".
+ * Digits after the last unit carry on from it, the way people write it in Vietnam: "1tr2" is
+ * 1.200.000, "1tr250" 1.250.000, "3k5" 3.500 (like 1.2m and 3.5k). Each part must fit under the
+ * unit above it, so "1m2500k" is a typo, not 3.5m.
  */
 const COMPOUND = /^(?:(\d+)(?:m|tr))?(?:(\d+)k)?(\d+)?$/
+
+/** "5" after a unit worth 1000 is 500; after a million, 500.000. At most as many digits as the unit has zeros. */
+function tail(digits: string, zeros: number): number | null {
+  return digits.length > zeros ? null : Number(digits.padEnd(zeros, "0"))
+}
 
 function parseCompound(s: string): number | null {
   const match = COMPOUND.exec(s)
@@ -27,13 +34,15 @@ function parseCompound(s: string): number | null {
   // At least two parts; one part alone ("5m", "250k") is handled with its decimals elsewhere.
   if ([m, k, rest].filter((part) => part !== undefined).length < 2) return null
   if (m !== undefined && k !== undefined && Number(k) >= 1000) return null
-  if (rest !== undefined && Number(rest) >= (k !== undefined ? 1000 : 1_000_000)) return null
-  return Number(m ?? 0) * 1_000_000 + Number(k ?? 0) * 1000 + Number(rest ?? 0)
+  // Digits at the end continue the unit just before them: thousands, or millions.
+  const last = rest === undefined ? 0 : tail(rest, k !== undefined ? 3 : 6)
+  if (last === null) return null
+  return Number(m ?? 0) * 1_000_000 + Number(k ?? 0) * 1000 + last
 }
 
 /**
  * "150.000", "150000" or "150k" => 150000, "1.5k" => 1500, "1m" or "1tr" => 1000000,
- * "2.5m" => 2500000, "1m250k" => 1250000, "1m250" => 1000250. Dots and commas group thousands,
+ * "2.5m" => 2500000, "1m250k" => 1250000, "1tr2" => 1200000, "3k5" => 3500. Dots and commas group thousands,
  * except before a unit where one of them is a decimal point. Null unless it's a positive whole
  * number of dong.
  */
@@ -108,7 +117,9 @@ export function splitByWeights(
   })
   let left = amount - rows.reduce((sum, r) => sum + r.base, 0)
   const extra = new Set<number>()
-  for (const r of [...rows].sort((a, b) => (a.rem === b.rem ? b.i - a.i : a.rem > b.rem ? -1 : 1))) {
+  for (const r of [...rows].sort((a, b) =>
+    a.rem === b.rem ? b.i - a.i : a.rem > b.rem ? -1 : 1,
+  )) {
     if (left-- <= 0) break
     extra.add(r.i)
   }
@@ -118,7 +129,9 @@ export function splitByWeights(
 
 /** What each participant owes for an expense. */
 export function expenseShares(e: ExpenseLike): Map<string, number> {
-  return e.weights ? splitByWeights(e.amount, e.participants, e.weights) : splitEqually(e.amount, e.participants)
+  return e.weights
+    ? splitByWeights(e.amount, e.participants, e.weights)
+    : splitEqually(e.amount, e.participants)
 }
 
 export type ExactSplit =
