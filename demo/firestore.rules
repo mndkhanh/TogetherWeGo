@@ -8,7 +8,8 @@ rules_version = '2';
 //     members/{uid}                         uid, name, altName?, photo?, role, code, joinedAt
 //     expenses/{expenseId}                  description, amount, paidBy, participants, spentOn, createdBy, createdAt,
 //                                           and optionally split + weights (uneven), photos (file names in Storage), reference,
-//                                           eventId (the plan it was for)
+//                                           eventId (the plan it was for), editedAt + editedBy, deletedAt + deletedBy
+//                                           (deleted ones stay, marked, and count for nothing)
 //     payments/{paymentId}                  from, to, amount, note, createdBy, createdAt
 //     events/{eventId}                      title, startsAt, location, createdBy, createdAt
 //       rsvps/{uid}                         status, name, updatedAt
@@ -348,7 +349,7 @@ service cloud.firestore {
         // src/shared/money.ts), who must all be in the group.
         function expenseOk(d) {
           return d.keys().hasAll(['description', 'amount', 'paidBy', 'participants', 'spentOn', 'createdBy', 'createdAt'])
-            && d.keys().hasOnly(['description', 'amount', 'paidBy', 'participants', 'split', 'weights', 'spentOn', 'createdBy', 'createdAt', 'photos', 'reference', 'eventId', 'editedAt', 'editedBy'])
+            && d.keys().hasOnly(['description', 'amount', 'paidBy', 'participants', 'split', 'weights', 'spentOn', 'createdBy', 'createdAt', 'photos', 'reference', 'eventId', 'editedAt', 'editedBy', 'deletedAt', 'deletedBy'])
             && photosOk(d.get('photos', []))
             && (!('reference' in d) || text(d.reference, 1, 300))
             && text(d.description, 1, 120)
@@ -369,27 +370,67 @@ service cloud.firestore {
             && d.spentOn.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
         }
 
+        // Everyone it's about is still in the group: changing it would move money for someone
+        // who has left, and nobody could settle that with them.
+        function everyoneStillIn(d) {
+          return d.paidBy in memberIds(groupId) && memberIds(groupId).hasAll(d.participants);
+        }
+
+        function notDeleted(d) {
+          return !('deletedAt' in d) && !('deletedBy' in d);
+        }
+
+        // Fixing it: the same checks as a new one; who added it, when, and its photos stay.
+        function editing() {
+          let d = request.resource.data;
+          return notDeleted(resource.data) && notDeleted(d)
+            && expenseOk(d)
+            && d.createdBy == resource.data.createdBy
+            && d.createdAt == resource.data.createdAt
+            && d.get('photos', []) == resource.data.get('photos', [])
+            && d.editedAt == request.time
+            && d.editedBy == uid();
+        }
+
+        // Deleting it: only marked, saying who and when, so the group sees it and it can be
+        // brought back. Nothing else changes.
+        function deleting() {
+          let d = request.resource.data;
+          return notDeleted(resource.data)
+            && d.diff(resource.data).affectedKeys().hasOnly(['deletedAt', 'deletedBy'])
+            && d.deletedAt == request.time
+            && d.deletedBy == uid()
+            && everyoneStillIn(resource.data);
+        }
+
+        // Bringing it back, as it was; it then counts as edited by whoever did.
+        function restoring() {
+          let d = request.resource.data;
+          return 'deletedAt' in resource.data
+            && notDeleted(d)
+            && d.diff(resource.data).affectedKeys()
+              .hasOnly(['deletedAt', 'deletedBy', 'editedAt', 'editedBy'])
+            && d.editedAt == request.time
+            && d.editedBy == uid()
+            && everyoneStillIn(resource.data);
+        }
+
         allow create: if isMember(groupId)
           && expenseOk(request.resource.data)
+          && notDeleted(request.resource.data)
           && !('editedAt' in request.resource.data)
           && !('editedBy' in request.resource.data)
           && request.resource.data.createdBy == uid()
           && request.resource.data.createdAt == request.time;
 
-        // Whoever added it, or the person it says paid, can fix it. Who added it and when stay,
-        // and so do the photos (they're added with the expense; storage.rules).
+        // Whoever added it, or the person it says paid (if they didn't, or it's wrong), can fix,
+        // delete or bring it back.
         allow update: if isMember(groupId)
           && (resource.data.createdBy == uid() || resource.data.paidBy == uid())
-          && expenseOk(request.resource.data)
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.get('photos', []) == resource.data.get('photos', [])
-          && request.resource.data.editedAt == request.time
-          && request.resource.data.editedBy == uid();
+          && (editing() || deleting() || restoring());
 
-        // Whoever added it, or the person it says paid (if they didn't, or it's wrong).
-        allow delete: if isMember(groupId)
-          && (resource.data.createdBy == uid() || resource.data.paidBy == uid());
+        // Never erased: a deleted expense stays, marked, with its photos.
+        allow delete: if false;
       }
 
       match /payments/{paymentId} {

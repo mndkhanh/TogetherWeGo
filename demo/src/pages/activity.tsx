@@ -190,12 +190,60 @@ function useMyEntries(uid: string, max: number) {
   }
   const confirmed = where("status", "==", "confirmed")
   const streams = [
-    { map: expense, live: useStreamPaths(`mine:e:in:${uid}`, "expenses", [where("participants", "array-contains", uid), orderBy("spentOn", "desc")], max) },
-    { map: expense, live: useStreamPaths(`mine:e:paid:${uid}`, "expenses", [where("paidBy", "==", uid), orderBy("spentOn", "desc")], max) },
-    { map: payment, live: useStreamPaths(`mine:p:from:${uid}`, "payments", [where("from", "==", uid), orderBy("createdAt", "desc")], max) },
-    { map: payment, live: useStreamPaths(`mine:p:to:${uid}`, "payments", [where("to", "==", uid), orderBy("createdAt", "desc")], max) },
-    { map: settlement, live: useStreamPaths(`mine:s:from:${uid}`, "settlements", [where("from", "==", uid), confirmed, orderBy("confirmedAt", "desc")], max) },
-    { map: settlement, live: useStreamPaths(`mine:s:to:${uid}`, "settlements", [where("to", "==", uid), confirmed, orderBy("confirmedAt", "desc")], max) },
+    {
+      map: expense,
+      live: useStreamPaths(
+        `mine:e:in:${uid}`,
+        "expenses",
+        [where("participants", "array-contains", uid), orderBy("spentOn", "desc")],
+        max,
+      ),
+    },
+    {
+      map: expense,
+      live: useStreamPaths(
+        `mine:e:paid:${uid}`,
+        "expenses",
+        [where("paidBy", "==", uid), orderBy("spentOn", "desc")],
+        max,
+      ),
+    },
+    {
+      map: payment,
+      live: useStreamPaths(
+        `mine:p:from:${uid}`,
+        "payments",
+        [where("from", "==", uid), orderBy("createdAt", "desc")],
+        max,
+      ),
+    },
+    {
+      map: payment,
+      live: useStreamPaths(
+        `mine:p:to:${uid}`,
+        "payments",
+        [where("to", "==", uid), orderBy("createdAt", "desc")],
+        max,
+      ),
+    },
+    {
+      map: settlement,
+      live: useStreamPaths(
+        `mine:s:from:${uid}`,
+        "settlements",
+        [where("from", "==", uid), confirmed, orderBy("confirmedAt", "desc")],
+        max,
+      ),
+    },
+    {
+      map: settlement,
+      live: useStreamPaths(
+        `mine:s:to:${uid}`,
+        "settlements",
+        [where("to", "==", uid), confirmed, orderBy("confirmedAt", "desc")],
+        max,
+      ),
+    },
   ]
 
   const error = streams.find((s) => s.live.error)?.live.error ?? null
@@ -218,7 +266,10 @@ function useMyEntries(uid: string, max: number) {
     }
   }
   return {
-    data: entries.filter((e) => e.at.getTime() > cutoff),
+    // Deleted expenses count for nothing; their group's history still shows them.
+    data: entries.filter(
+      (e) => e.at.getTime() > cutoff && !(e.kind === "expense" && e.expense.deletedAt),
+    ),
     error: null,
     more: cutoff > -Infinity,
   }
@@ -276,8 +327,20 @@ function toItems(
     }
     const p =
       e.kind === "payment"
-        ? { id: e.payment.id, from: e.payment.from, to: e.payment.to, amount: e.payment.amount, how: e.payment.note ? `cash · ${e.payment.note}` : "cash" }
-        : { id: e.settlement.id, from: e.settlement.from, to: e.settlement.to, amount: e.settlement.paidAmount ?? e.settlement.amount, how: "bank transfer" }
+        ? {
+            id: e.payment.id,
+            from: e.payment.from,
+            to: e.payment.to,
+            amount: e.payment.amount,
+            how: e.payment.note ? `cash · ${e.payment.note}` : "cash",
+          }
+        : {
+            id: e.settlement.id,
+            from: e.settlement.from,
+            to: e.settlement.to,
+            amount: e.settlement.paidAmount ?? e.settlement.amount,
+            how: "bank transfer",
+          }
     const paid = p.from === me
     out.push({
       id: p.id,
@@ -304,7 +367,8 @@ function Timeline({ items, showGroup }: { items: Item[]; showGroup: boolean }) {
         const heading = month(i.at)
         const showHeading = heading !== lastMonth
         lastMonth = heading
-        const Icon = i.kind === "expense" ? Receipt : i.kind === "paid" ? ArrowUpRight : ArrowDownLeft
+        const Icon =
+          i.kind === "expense" ? Receipt : i.kind === "paid" ? ArrowUpRight : ArrowDownLeft
         return (
           <React.Fragment key={`${i.groupId}/${i.id}`}>
             {showHeading && (
@@ -316,7 +380,9 @@ function Timeline({ items, showGroup }: { items: Item[]; showGroup: boolean }) {
               <span
                 className={cx(
                   "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
-                  i.kind === "expense" ? "bg-brand-soft text-brand" : "bg-canvas text-muted ring-1 ring-line",
+                  i.kind === "expense"
+                    ? "bg-brand-soft text-brand"
+                    : "bg-canvas text-muted ring-1 ring-line",
                 )}
               >
                 <Icon className="size-4" aria-hidden />

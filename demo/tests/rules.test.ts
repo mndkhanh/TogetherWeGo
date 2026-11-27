@@ -412,19 +412,81 @@ describe("expenses and payments", () => {
     await assertFails(add(expense("binh", { reference: "x".repeat(301) })))
   })
 
-  it("lets only the creator or the payer delete an expense, and nobody edit one", async () => {
+  it("lets the creator or the payer mark an expense deleted, saying who, and bring it back", async () => {
     await seed()
     const ref = await addDoc(collection(as("binh"), "groups/g1/expenses"), expense("binh"))
-    await assertFails(updateDoc(doc(as("binh"), ref.path), { amount: 1 }))
-    await assertFails(deleteDoc(doc(as("an"), ref.path)))
-    await assertSucceeds(deleteDoc(doc(as("binh"), ref.path)))
-    // Added by Binh, saying An paid: either of them can delete it.
+    const del = (uid: string, extra: Record<string, unknown> = {}) =>
+      updateDoc(doc(as(uid), ref.path), { deletedAt: serverTimestamp(), deletedBy: uid, ...extra })
+    const restore = (uid: string, extra: Record<string, unknown> = {}) =>
+      updateDoc(doc(as(uid), ref.path), {
+        deletedAt: deleteField(),
+        deletedBy: deleteField(),
+        editedAt: serverTimestamp(),
+        editedBy: uid,
+        ...extra,
+      })
+    // Never erased, by anyone.
+    await assertFails(deleteDoc(doc(as("binh"), ref.path)))
+    // Only marked: saying who, truthfully, and changing nothing else.
+    await assertFails(del("binh", { deletedBy: "an" }))
+    await assertFails(del("binh", { amount: 1 }))
+    await assertFails(updateDoc(doc(as("binh"), ref.path), { deletedBy: "binh" }))
+    // Added and paid by Binh: An can't delete it, Binh can, once.
+    await assertFails(del("an"))
+    await assertSucceeds(del("binh"))
+    await assertFails(del("binh"))
+    // A deleted expense can't be edited, only brought back as it was.
+    await assertFails(
+      updateDoc(doc(as("binh"), ref.path), {
+        amount: 1,
+        editedAt: serverTimestamp(),
+        editedBy: "binh",
+      }),
+    )
+    await assertFails(restore("binh", { amount: 1 }))
+    await assertFails(restore("an"))
+    await assertSucceeds(restore("binh"))
+
+    // Added by Binh, saying An paid: either of them can delete it, nobody else.
     const forAn = await addDoc(
       collection(as("binh"), "groups/g1/expenses"),
       expense("binh", { paidBy: "an" }),
     )
-    await assertFails(deleteDoc(doc(as("mallory"), forAn.path)))
-    await assertSucceeds(deleteDoc(doc(as("an"), forAn.path)))
+    await assertFails(
+      updateDoc(doc(as("mallory"), forAn.path), {
+        deletedAt: serverTimestamp(),
+        deletedBy: "mallory",
+      }),
+    )
+    await assertSucceeds(
+      updateDoc(doc(as("an"), forAn.path), { deletedAt: serverTimestamp(), deletedBy: "an" }),
+    )
+    // And a new expense can't start out deleted.
+    await assertFails(
+      addDoc(
+        collection(as("binh"), "groups/g1/expenses"),
+        expense("binh", { deletedAt: serverTimestamp(), deletedBy: "binh" }),
+      ),
+    )
+  })
+
+  it("keeps expenses involving someone who left as they are", async () => {
+    await seed()
+    const ref = await addDoc(collection(as("an"), "groups/g1/expenses"), expense("an"))
+    // Binh leaves the group (as the owner's removal does).
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), "groups/g1"), { memberIds: ["an"] })
+    })
+    await assertFails(
+      updateDoc(doc(as("an"), ref.path), { deletedAt: serverTimestamp(), deletedBy: "an" }),
+    )
+    await assertFails(
+      updateDoc(doc(as("an"), ref.path), {
+        amount: 1,
+        editedAt: serverTimestamp(),
+        editedBy: "an",
+      }),
+    )
   })
 
   it("lets the creator or the payer fix an expense, keeping who added it and its photos", async () => {
@@ -479,12 +541,17 @@ describe("expenses and payments", () => {
 
   it("finds your own entries across groups, and only yours", async () => {
     await seed()
-    await addDoc(collection(as("an"), "groups/g1/expenses"), expense("an", { participants: ["an"] }))
+    await addDoc(
+      collection(as("an"), "groups/g1/expenses"),
+      expense("an", { participants: ["an"] }),
+    )
     await addDoc(collection(as("an"), "groups/g1/expenses"), expense("an"))
     const mine = (uid: string, field: string, op: "==" | "array-contains", value: string) =>
       getDocs(query(collectionGroup(as(uid), "expenses"), where(field, op, value)))
     // Bình is in one of them.
-    expect((await assertSucceeds(mine("binh", "participants", "array-contains", "binh"))).size).toBe(1)
+    expect(
+      (await assertSucceeds(mine("binh", "participants", "array-contains", "binh"))).size,
+    ).toBe(1)
     expect((await assertSucceeds(mine("an", "paidBy", "==", "an"))).size).toBe(2)
     // Asking for someone else's is refused, as is everything at once.
     await assertFails(mine("mallory", "participants", "array-contains", "binh"))

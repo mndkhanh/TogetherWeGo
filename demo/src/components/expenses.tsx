@@ -7,8 +7,10 @@ import {
   Minus,
   Pencil,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
+  TriangleAlert,
   X,
 } from "lucide-react"
 import * as React from "react"
@@ -35,9 +37,11 @@ import {
   dataErrorMessage,
   deleteExpense,
   PAGE_SIZE,
+  restoreExpense,
   updateExpense,
   useEvents,
   useExpenses,
+  usePayments,
   type Expense,
   type HangoutEvent,
   type Member,
@@ -51,7 +55,20 @@ import {
   splitEqually,
   type SplitKind,
 } from "@/lib/money"
+import { useConfirmedSettlements, usePendingSettlements } from "@/lib/payments"
 import { expensePhotoUrl, MAX_PHOTOS, PhotoError } from "@/lib/photos"
+
+function shortDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" })
+}
+
+function NewBadge() {
+  return (
+    <span className="shrink-0 rounded-full bg-marigold-soft px-1.5 py-px text-[0.65rem] font-bold text-ink">
+      New
+    </span>
+  )
+}
 
 function today(): string {
   const d = new Date()
@@ -88,19 +105,61 @@ export function ExpensesTab({
   const memberIds = new Set(members.map((m) => m.uid))
   const remove = useAction()
   const { confirm, dialog } = useConfirm()
+  // For the warnings before deleting: paying back since, and bank transfers in progress.
+  const payments = usePayments(groupId)
+  const confirmed = useConfirmedSettlements(groupId)
+  const pending = usePendingSettlements(groupId)
+  const who = (uid: string) => (uid === user.uid ? "You" : (names.get(uid) ?? "A former member"))
+  const whom = (uid: string) => (uid === user.uid ? "you" : (names.get(uid) ?? "a former member"))
+
+  /** What deleting would upset: paying back done since it was added, or a transfer under way. */
+  const deleteWarnings = (e: Expense): string[] => {
+    const people = new Set([e.paidBy, ...e.participants])
+    const between = (x: { from: string; to: string }) => people.has(x.from) && people.has(x.to)
+    const warnings: string[] = []
+    const paidSince = [
+      ...(payments.data ?? []).map((p) => ({ from: p.from, to: p.to, at: p.createdAt })),
+      ...(confirmed.data ?? []).map((s) => ({ from: s.from, to: s.to, at: s.confirmedAt })),
+    ]
+      .filter((x) => x.at && e.createdAt && x.at > e.createdAt && between(x))
+      .sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0))[0]
+    if (paidSince?.at) {
+      warnings.push(
+        `${who(paidSince.from)} paid ${whom(paidSince.to)} back on ${shortDate(paidSince.at)}, after this was added. Deleting it changes what they owe again.`,
+      )
+    }
+    const transfer = (pending.data ?? []).find(between)
+    if (transfer) {
+      warnings.push(
+        `${who(transfer.from)} ${transfer.from === user.uid ? "have" : "has"} a bank transfer of ${formatVnd(transfer.amount)} to ${whom(transfer.to)} in progress. Its amount was set before this change, so it may end up too much or too little.`,
+      )
+    }
+    return warnings
+  }
 
   const askDelete = async (e: Expense) => {
+    const warnings = deleteWarnings(e)
     const ok = await confirm({
       title: `Delete “${e.description}”?`,
       body: (
         <>
-          {formatVnd(e.amount)} comes off everyone's balances
-          {e.photos.length > 0 ? ", and its photos are deleted" : ""}. This can't be undone.
+          {formatVnd(e.amount)} stops counting in everyone's balances. It stays in the history,
+          marked deleted, and can be brought back.
+          {warnings.length > 0 && (
+            <span className="mt-3 flex flex-col gap-2">
+              {warnings.map((w) => (
+                <span key={w} className="flex gap-2 rounded-lg bg-marigold-soft p-2.5 text-ink">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  {w}
+                </span>
+              ))}
+            </span>
+          )}
         </>
       ),
       action: "Delete expense",
     })
-    if (ok) void remove.run(() => deleteExpense(groupId, e), dataErrorMessage)
+    if (ok) void remove.run(() => deleteExpense(groupId, e.id, user.uid), dataErrorMessage)
   }
 
   const query = search.trim().toLowerCase()
@@ -113,11 +172,12 @@ export function ExpensesTab({
       (!person || e.paidBy === person || e.participants.includes(person)) &&
       (!plan || e.eventId === plan),
   )
-  // Added or changed by someone else since your last visit.
+  // Added, changed or deleted by someone else since your last visit.
   const isNew = (e: Expense) => {
     if (!newSince) return false
-    const at = e.editedAt ?? e.createdAt
-    return at !== null && at > newSince && e.createdBy !== user.uid
+    const at = e.deletedAt ?? e.editedAt ?? e.createdAt
+    const by = e.deletedBy ?? e.editedBy ?? e.createdBy
+    return at !== null && at > newSince && by !== user.uid
   }
   const newCount = (expenses.data ?? []).filter(isNew).length
   const form = (onDone?: () => void, initial?: Expense) => (
@@ -185,6 +245,47 @@ export function ExpensesTab({
                   // Rules check everyone in it is still in the group.
                   const editable =
                     memberIds.has(e.paidBy) && e.participants.every((p) => memberIds.has(p))
+                  const lockedTitle = "Someone in it has left the group, so it can't be changed"
+                  if (e.deletedAt) {
+                    return (
+                      <li key={e.id} className="flex items-center gap-3 py-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-canvas text-muted ring-1 ring-line">
+                          <Trash2 className="size-4" aria-hidden />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="flex items-center gap-2">
+                            <span className="truncate text-muted line-through">
+                              {e.description}
+                            </span>
+                            {isNew(e) && <NewBadge />}
+                          </p>
+                          <p className="text-xs text-muted">
+                            {who(e.deletedBy ?? "")} deleted it · {shortDate(e.deletedAt)}
+                          </p>
+                        </div>
+                        <p className="text-sm text-muted tabular-nums line-through">
+                          {formatVnd(e.amount)}
+                        </p>
+                        {mayChange && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!editable || remove.busy}
+                            title={editable ? "Count it again" : lockedTitle}
+                            onClick={() =>
+                              void remove.run(
+                                () => restoreExpense(groupId, e.id, user.uid),
+                                dataErrorMessage,
+                              )
+                            }
+                          >
+                            <RotateCcw className="size-3.5" aria-hidden />
+                            Restore
+                          </Button>
+                        )}
+                      </li>
+                    )
+                  }
                   return (
                     <li key={e.id} className="flex items-start gap-3 py-3">
                       <Avatar
@@ -195,11 +296,7 @@ export function ExpensesTab({
                       <div className="min-w-0 flex-1">
                         <p className="flex items-center gap-2">
                           <span className="truncate font-semibold">{e.description}</span>
-                          {isNew(e) && (
-                            <span className="shrink-0 rounded-full bg-marigold-soft px-1.5 py-px text-[0.65rem] font-bold text-ink">
-                              New
-                            </span>
-                          )}
+                          {isNew(e) && <NewBadge />}
                         </p>
                         <p className="text-xs text-muted">
                           {payer} paid ·{" "}
@@ -247,11 +344,7 @@ export function ExpensesTab({
                             variant="ghost"
                             size="sm"
                             aria-label={`Edit ${e.description}`}
-                            title={
-                              editable
-                                ? "Edit"
-                                : "Someone in it has left the group, so it can't be changed"
-                            }
+                            title={editable ? "Edit" : lockedTitle}
                             disabled={!editable}
                             onClick={() => setEditing(e)}
                           >
@@ -261,7 +354,8 @@ export function ExpensesTab({
                             variant="danger"
                             size="sm"
                             aria-label={`Delete ${e.description}`}
-                            disabled={remove.busy}
+                            title={editable ? "Delete" : lockedTitle}
+                            disabled={!editable || remove.busy}
                             onClick={() => void askDelete(e)}
                           >
                             <Trash2 className="size-4" aria-hidden />
@@ -579,7 +673,10 @@ function ExpenseForm({
     `Paid by ${payerName}`,
     spentOn === today()
       ? "today"
-      : new Date(`${spentOn}T00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+      : new Date(`${spentOn}T00:00`).toLocaleDateString(undefined, {
+          day: "numeric",
+          month: "short",
+        }),
     planName,
     reference.trim() && "a reference",
     photos.length > 0 && `${photos.length} photo${photos.length === 1 ? "" : "s"}`,
@@ -629,7 +726,9 @@ function ExpenseForm({
                 >
                   <span className="font-semibold">{m.name}</span>
                   {m.altName && <span className="text-white/70"> · {m.altName}</span>}
-                  <span className="block text-white/70">{on ? "In the split" : "Not in the split"}</span>
+                  <span className="block text-white/70">
+                    {on ? "In the split" : "Not in the split"}
+                  </span>
                 </span>
               </span>
             )
@@ -653,7 +752,9 @@ function ExpenseForm({
               }}
               className={cx(
                 "rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors",
-                mode === m.id ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink",
+                mode === m.id
+                  ? "bg-surface text-ink shadow-sm ring-1 ring-line"
+                  : "text-muted hover:text-ink",
               )}
             >
               {m.label}
@@ -726,7 +827,11 @@ function ExpenseForm({
           <div className="flex flex-col gap-4 border-t border-line p-3">
             <div className="grid gap-4 @md:grid-cols-2">
               <Field label="Paid by">
-                <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)} className={selectClass}>
+                <select
+                  value={paidBy}
+                  onChange={(e) => setPaidBy(e.target.value)}
+                  className={selectClass}
+                >
                   <option value={user.uid}>You</option>
                   {members
                     .filter((m) => m.uid !== user.uid)
@@ -757,7 +862,10 @@ function ExpenseForm({
                     {planOptions.map((ev) => (
                       <option key={ev.id} value={ev.id}>
                         {ev.title} ·{" "}
-                        {ev.startsAt.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                        {ev.startsAt.toLocaleDateString(undefined, {
+                          day: "numeric",
+                          month: "short",
+                        })}
                       </option>
                     ))}
                   </select>

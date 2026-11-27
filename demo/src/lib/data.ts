@@ -73,6 +73,13 @@ export interface Expense {
   createdAt: Date | null
   /** When it was last changed, if ever. */
   editedAt: Date | null
+  editedBy: string | null
+  /**
+   * When it was deleted, and by whom. A deleted expense stays in the history, marked, and counts
+   * for nothing; it can be brought back.
+   */
+  deletedAt: Date | null
+  deletedBy: string | null
 }
 
 export interface Payment {
@@ -142,13 +149,17 @@ export function useLive<T>(
       return onSnapshot(
         target,
         (snap) =>
-          setState({ data: snap.exists() ? [map(snap.id, snap.data(), snap.ref.path)] : [], error: null }),
+          setState({
+            data: snap.exists() ? [map(snap.id, snap.data(), snap.ref.path)] : [],
+            error: null,
+          }),
         onError,
       )
     }
     return onSnapshot(
       target,
-      (snap) => setState({ data: snap.docs.map((d) => map(d.id, d.data(), d.ref.path)), error: null }),
+      (snap) =>
+        setState({ data: snap.docs.map((d) => map(d.id, d.data(), d.ref.path)), error: null }),
       onError,
     )
   }, [key])
@@ -389,6 +400,10 @@ export function toExpense(id: string, d: DocumentData): Expense {
     eventId: d.eventId ?? null,
     createdAt: toDate(d.createdAt),
     editedAt: toDate(d.editedAt),
+    editedBy: d.editedBy ?? null,
+    // A moment without the server's time still counts as deleted.
+    deletedAt: d.deletedBy ? (toDate(d.deletedAt) ?? new Date()) : null,
+    deletedBy: d.deletedBy ?? null,
   }
 }
 
@@ -401,6 +416,19 @@ export function useExpenses(groupId: string, max = PAGE_SIZE): Live<Expense[]> &
     toExpense,
   )
   return { ...live, data: live.data?.slice(0, max), more: (live.data?.length ?? 0) > max }
+}
+
+/**
+ * Every expense for one of the group's plans, deleted ones left out, for the plans' totals. Not
+ * paged: a group's plans see a few dozen expenses, not thousands.
+ */
+export function usePlanExpenses(groupId: string): Live<Expense[]> {
+  const live = useLive(
+    `plan-expenses:${groupId}`,
+    () => query(sub(groupId, "expenses"), where("eventId", "!=", null)),
+    toExpense,
+  )
+  return { ...live, data: live.data?.filter((e) => !e.deletedAt) }
 }
 
 /** What the expense form saves, new or edited. */
@@ -455,7 +483,8 @@ export async function addExpense(
 }
 
 const DELETE = deleteField()
-const isDeleteField = (v: unknown) => typeof v === "object" && v !== null && DELETE.isEqual(v as never)
+const isDeleteField = (v: unknown) =>
+  typeof v === "object" && v !== null && DELETE.isEqual(v as never)
 
 /** Fixes an expense: everything but its photos, who added it and when. */
 export async function updateExpense(groupId: string, id: string, input: ExpenseInput, uid: string) {
@@ -467,10 +496,26 @@ export async function updateExpense(groupId: string, id: string, input: ExpenseI
   balancesChanged(groupId)
 }
 
-/** The photos first: once the expense is gone, they'd be harder to find. */
-export async function deleteExpense(groupId: string, expense: Expense) {
-  await deleteExpensePhotos(groupId, expense.id, expense.photos)
-  await deleteDoc(doc(db, "groups", groupId, "expenses", expense.id))
+/**
+ * Marks an expense deleted, saying who. It stays in the history (photos too) and counts for
+ * nothing until it's brought back.
+ */
+export async function deleteExpense(groupId: string, id: string, uid: string) {
+  await updateDoc(doc(db, "groups", groupId, "expenses", id), {
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+  })
+  balancesChanged(groupId)
+}
+
+/** Brings a deleted expense back as it was. It then shows as edited by you. */
+export async function restoreExpense(groupId: string, id: string, uid: string) {
+  await updateDoc(doc(db, "groups", groupId, "expenses", id), {
+    deletedAt: deleteField(),
+    deletedBy: deleteField(),
+    editedAt: serverTimestamp(),
+    editedBy: uid,
+  })
   balancesChanged(groupId)
 }
 
@@ -550,7 +595,11 @@ export function balancesChanged(groupId: string) {
  * A group from before they were stored gets counted on first view.
  */
 export function useBalances(groupId: string): Live<Balances> {
-  const live = useLive(`balances:${groupId}`, () => doc(db, "groups", groupId, "summary", "balances"), (_id, d) => d)
+  const live = useLive(
+    `balances:${groupId}`,
+    () => doc(db, "groups", groupId, "summary", "balances"),
+    (_id, d) => d,
+  )
   const [, rerender] = React.useReducer((n: number) => n + 1, 0)
   const asked = React.useRef("")
 

@@ -134,7 +134,7 @@ function YourBalance({
   const name = (uid: string) => names.get(uid) ?? "a former member"
   const mine = simplifyDebts(balances.net).filter((t) => t.from === user.uid || t.to === user.uid)
   const owe = mine.filter((t) => t.from === user.uid)
-  if (balances.expenseCount === 0) return null
+  if (balances.expenseCount === 0 && balances.paymentCount === 0) return null
 
   return (
     <section

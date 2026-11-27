@@ -12,6 +12,7 @@ import {
   doc,
   getDoc,
   getFirestore,
+  deleteField,
   serverTimestamp,
   Timestamp,
   setDoc,
@@ -164,7 +165,7 @@ describe("running balances", () => {
     expect(d.spent).toEqual({ [an.uid]: 150_000, [binh.uid]: 150_000 })
 
     // Bình records what An paid for him; then pays An back in cash.
-    await addDoc(collection(binh.db, "groups", id, "expenses"), {
+    const taxi = await addDoc(collection(binh.db, "groups", id, "expenses"), {
       description: "Taxi",
       amount: 100_000,
       paidBy: an.uid,
@@ -184,15 +185,42 @@ describe("running balances", () => {
     d = await balancesOf(an, id, (d) => d.expenseCount === 2 && d.paymentCount === 1)
     expect(d.net).toEqual({})
 
+    // A deleted expense counts for nothing, and the change is credited to whoever deleted it
+    // (not to who added it).
+    const lastChange = async (by: string) => {
+      const until = Date.now() + 15_000
+      for (;;) {
+        const got = (await getDoc(doc(an.db, "groups", id, "summary", "activity"))).data()?.by
+        if (got === by || Date.now() > until) return got
+        await new Promise((r) => setTimeout(r, 300))
+      }
+    }
+    await updateDoc(taxi, { deletedAt: serverTimestamp(), deletedBy: binh.uid })
+    d = await balancesOf(an, id, (d) => d.expenseCount === 1)
+    expect(d.net).toEqual({ [an.uid]: -100_000, [binh.uid]: 100_000 })
+    expect(d.spent).toEqual({ [an.uid]: 150_000, [binh.uid]: 150_000 })
+    expect(await lastChange(binh.uid)).toBe(binh.uid)
+    // Brought back by An, the payer: it counts again, and the change is An's.
+    await updateDoc(doc(an.db, taxi.path), {
+      deletedAt: deleteField(),
+      deletedBy: deleteField(),
+      editedAt: serverTimestamp(),
+      editedBy: an.uid,
+    })
+    d = await balancesOf(an, id, (d) => d.expenseCount === 2)
+    expect(d.net).toEqual({})
+    expect(await lastChange(an.uid)).toBe(an.uid)
+
     // A member can't write them, and a group without them gets them on request.
     expect(
       await rejected(setDoc(doc(an.db, "groups", id, "summary", "balances"), { net: {} })),
     ).toBe("permission-denied")
-    expect(
-      await rejected(mallory.call("refreshBalances", { groupId: id })),
-    ).toBe("functions/permission-denied")
+    expect(await rejected(mallory.call("refreshBalances", { groupId: id }))).toBe(
+      "functions/permission-denied",
+    )
     await binh.call("refreshBalances", { groupId: id })
-  })
+    // Several rounds of waiting for the server's recount.
+  }, 90_000)
 })
 
 describe("bank accounts", () => {

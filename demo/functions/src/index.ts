@@ -268,7 +268,9 @@ async function recomputeBalances(groupId: string): Promise<Map<string, number>> 
   const readTime = [expenses.readTime, payments.readTime, settlements.readTime].reduce((a, b) =>
     a.toMillis() <= b.toMillis() ? a : b,
   )
-  const asExpenses = expenses.docs.map((d) => {
+  // Deleted expenses stay in the group's history but count for nothing.
+  const live = expenses.docs.filter((d) => !d.get("deletedAt"))
+  const asExpenses = live.map((d) => {
     const e = d.data()
     return {
       amount: e.amount as number,
@@ -300,7 +302,7 @@ async function recomputeBalances(groupId: string): Promise<Map<string, number>> 
     tx.set(ref, {
       net: Object.fromEntries([...net].filter(([, v]) => v !== 0)),
       spent: Object.fromEntries(spent),
-      expenseCount: expenses.size,
+      expenseCount: live.length,
       paymentCount: payments.size + settlements.size,
       readTime,
       updatedAt: FieldValue.serverTimestamp(),
@@ -314,6 +316,8 @@ function changedBy(before: DocumentData | undefined, after: DocumentData | undef
   if (after?.status === "confirmed" && before?.status !== "confirmed") {
     return after.via === "payee" ? (after.to as string) : null
   }
+  // Deleting only marks the expense, saying who. (Bringing it back sets editedBy.)
+  if (after?.deletedBy && !before?.deletedBy) return after.deletedBy as string
   return ((after?.editedBy ?? (after ?? before)?.createdBy) as string | undefined) ?? null
 }
 
@@ -343,7 +347,12 @@ const onMoneyChange = (collection: string) =>
     if (!(await db.doc(`groups/${groupId}`).get()).exists) return
     await Promise.all([
       recomputeBalances(groupId),
-      noteChange(groupId, changedBy(before, after), Timestamp.fromDate(new Date(event.time))),
+      noteChange(
+        groupId,
+        changedBy(before, after),
+        // The write's own commit time: exact, so two quick changes keep their order.
+        event.data?.after.updateTime ?? Timestamp.fromDate(new Date(event.time)),
+      ),
     ])
   })
 

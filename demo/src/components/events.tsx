@@ -21,7 +21,7 @@ import {
   deleteEvent,
   setRsvp,
   useEvents,
-  useExpenses,
+  usePlanExpenses,
   useRsvps,
   type HangoutEvent,
   type RsvpStatus,
@@ -32,7 +32,7 @@ const RSVP_LABELS: Record<RsvpStatus, string> = { going: "Going", maybe: "Maybe"
 
 export function EventsTab({ groupId }: { groupId: string }) {
   const events = useEvents(groupId)
-  const expenses = useExpenses(groupId)
+  const expenses = usePlanExpenses(groupId)
   // What was spent for each plan: total and number of expenses.
   const spent = new Map<string, { total: number; count: number }>()
   for (const e of expenses.data ?? []) {
@@ -72,13 +72,7 @@ export function EventsTab({ groupId }: { groupId: string }) {
             {showPast && (
               <div className="mt-3 flex flex-col gap-3 opacity-75">
                 {past.map((e) => (
-                  <EventCard
-                    key={e.id}
-                    groupId={groupId}
-                    event={e}
-                    spent={spent.get(e.id)}
-                    past
-                  />
+                  <EventCard key={e.id} groupId={groupId} event={e} spent={spent.get(e.id)} past />
                 ))}
               </div>
             )}
